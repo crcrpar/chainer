@@ -477,7 +477,7 @@ def main():
     model.to_device(device)
 
     # Setup optimizer
-    optimizer = chainer.optimizers.Adam()
+    optimizer = chainer.optimizers.Adam(1e-4)
     optimizer.setup(model)
 
     # Setup iterator
