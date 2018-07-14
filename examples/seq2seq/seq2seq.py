@@ -493,7 +493,6 @@ def main():
 
     # Set the current device
     device.use()
-
     # Setup model
     model = Seq2seq(args.layer, len(source_ids), len(target_ids), args.unit,
                     args.dropout, args.use_attention, args.use_bidirectional)
