@@ -38,38 +38,15 @@ class InstanceNormalization(functions.BatchNormalization):
 
     mean = None
     inv_std = None
-    axis = None
 
-    def __init__(self, eps=2e-5, mean=None, var=None, decay=0.9):
-        self.running_mean = mean
-        self.running_var = var
-
-        axis = InstanceNormalization.axis
-        # Note: cuDNN requires that eps be greater than or equals to
-        # CUDNN_BN_MIN_EPSILON. Otherwise, an error will occur.
-        # See CUDNN_BN_MIN_EPSILON value in cudnn.h to verify minimum allowable
-        # value.
-        self.eps = eps
-        if chainer.should_use_cudnn('>=auto'):
-            if eps < libcudnn.CUDNN_BN_MIN_EPSILON:
-                raise RuntimeError(
-                    'cuDNN does not allow an eps value '
-                    'less than {}.'.format(libcudnn.CUDNN_BN_MIN_EPSILON))
-        self.decay = decay
-        if isinstance(axis, collections_abc.Sequence):
-            for i in range(1, len(axis)):
-                if axis[i - 1] >= axis[i]:
-                    msg = 'numbers in axis must be sorted in ascending order'
-                    raise RuntimeError(msg)
-        elif isinstance(axis, int):
-            axis = axis,
-        elif axis is not None:
-            raise RuntimeError('axis must be int, tuple of int or None')
-        self.axis = axis
+    def __init__(self, eps=2e-5, mean=None, var=None, decay=0.9, _axis=None):
+        super(InstanceNormalization, self).__init__(
+            eps, mean, var, decay, axis
+        )
 
     def forward(self, inputs):
-        self.retain_inputs((0, 1, 3, 4))
-        x, gamma, beta, mean, var = inputs
+        self.retain_inputs((0, 1))
+        x, gamma, beta = inputs
 
         xp = cuda.get_array_module(x)
         if self.running_mean is None:
@@ -98,6 +75,7 @@ class InstanceNormalization(functions.BatchNormalization):
         self.use_ideep = self.mode.can_use_ideep()
 
         if self.use_ideep:
+            # TODO(niboshi): Refactor iDeep part into a separate method
             expand_dim = False
             if x.ndim == 2:
                 expand_dim = True
@@ -107,7 +85,7 @@ class InstanceNormalization(functions.BatchNormalization):
             beta = beta[expander]
             W = numpy.concatenate((gamma, beta), axis=0).reshape((2, -1))
 
-            y, mean, var, inv_std = (
+            y, self.mean, self.var, self.inv_std = (
                 intel64.ideep.batchNormalization.Forward(
                     intel64.ideep.array(x),
                     intel64.ideep.array(W),
@@ -115,30 +93,30 @@ class InstanceNormalization(functions.BatchNormalization):
                     None,
                     self.eps
                 ))
-            y = xp.reshape(y, org_shape)
-            self.mean = xp.mean(xp.reshape(mean, (batchsize, channels)), 0)
-            self.var = xp.mean(xp.reshape(var, (batchsize, channels)), 0)
-            self.inv_std = xp.mean(xp.reshape(inv_std, (batchsize, channels)), 0)
 
             m = x.size // gamma.size
             adjust = m / max(m - 1., 1.)
 
+            mean = xp.mean(xp.reshape(mean, (batchsize, channels)), 0)
+            var = xp.mean(xp.reshape(var, (batchsize, channels)), 0)
+            inv_std = xp.mean(xp.reshape(inv_std, (batchsize, channels)), 0)
             # Update running_mean
             if isinstance(self.running_mean, intel64.ideep.mdarray):
                 self.running_mean.inplace_axpby(
-                    self.decay, (1 - self.decay), self.mean)
+                    self.decay, (1 - self.decay), mean)
             else:
                 self.running_mean *= self.decay
-                self.running_mean += self.mean * (1 - self.decay)
+                self.running_mean += mean * (1 - self.decay)
 
             # Update running_var
             if isinstance(self.running_var, intel64.ideep.mdarray):
                 self.running_var.inplace_axpby(
-                    self.decay, (1 - self.decay), self.var * adjust)
+                    self.decay, (1 - self.decay), var * adjust)
             else:
                 self.running_var *= self.decay
-                self.running_var += self.var * adjust * (1 - self.decay)
+                self.running_var += var * adjust * (1 - self.decay)
 
+            y = xp.reshape(y, org_shape)
             if expand_dim:
                 y = numpy.squeeze(y, axis=(2, 3))
 
@@ -156,16 +134,16 @@ class InstanceNormalization(functions.BatchNormalization):
             libcudnn.deriveBNTensorDescriptor(derivedBnDesc.value,
                                               x_desc.value, cudnn_mode)
             dtype_param = _get_dtype_of_tensor_descriptor(derivedBnDesc)
-            running_mean = xp.repeat(self.running_mean, batchsize, 0)
-            running_var = xp.repeat(self.running_var, batchsize, 0)
+            _running_mean = xp.empty_like(gamma)
+            _running_var = xp.empty_like(gamma)
             if dtype_param is not dtype:
                 gamma = gamma.astype(dtype_param)
                 beta = beta.astype(dtype_param)
-                running_mean = running_mean.astype(dtype_param)
-                running_var = running_var.astype(dtype_param)
+                _running_mean = _running_mean.astype(dtype_param)
+                _running_var = _running_var.astype(dtype_param)
             else:
-                running_mean = running_mean
-                running_var = running_var
+                _running_mean = _running_mean
+                _running_var = _running_var
 
             oz_dtype = 'd' if x.dtype == 'd' else 'f'
             one = numpy.array(1, dtype=oz_dtype).ctypes
@@ -178,15 +156,13 @@ class InstanceNormalization(functions.BatchNormalization):
                 self.mean = xp.empty_like(gamma)
                 self.inv_std = xp.empty_like(gamma)
 
-            mean = xp.repeat(self.mean, batchsize, 0)
-            inv_std = xp.repeat(self.inv_std, batchsize, 0)
             libcudnn.batchNormalizationForwardTraining(
                 handle, cudnn_mode, one.data, zero.data,
                 x_desc.value, x.data.ptr, x_desc.value,
                 y.data.ptr, derivedBnDesc.value, gamma.data.ptr,
-                beta.data.ptr, factor, running_mean.data.ptr,
-                running_var.data.ptr, self.eps,
-                mean.data.ptr, inv_std.data.ptr)
+                beta.data.ptr, factor, _running_mean.data.ptr,
+                _running_var.data.ptr, self.eps,
+                self.mean.data.ptr, self.inv_std.data.ptr)
 
             if (cudnn_mode is libcudnn.CUDNN_BATCHNORM_SPATIAL_PERSISTENT and
                     configuration.config.debug):
@@ -197,6 +173,15 @@ class InstanceNormalization(functions.BatchNormalization):
                         'A numerical overflow might have happend in cuDNN'
                         'batch normalization (status:{})'.format(rstatus))
 
+            def _reshape(array):
+                return self.xp.reshape(array, (batchsize, channels))
+
+            # how to correct these terms
+            tmp_mean = self.xp.mean(_reshape(self.mean), axis=0)
+            tmp_var = self.xp.mean(_reshape(self.mean), axis=0)
+
+            running_mean = xp.repeat(self.running_mean, batchsize, 0)
+            running_var = xp.repeat(self.running_var, batchsize, 0)
             running_mean = xp.mean(xp.reshape(running_mean, (batchsize, channels)), 0)
             running_var = xp.mean(xp.reshape(running_var, (batchsize, channels)), 0)
             if dtype_param is not dtype:

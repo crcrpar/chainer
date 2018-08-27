@@ -1,6 +1,3 @@
-import numpy
-
-import chainer
 from chainer.backends import cuda
 from chainer import configuration
 from chainer import functions
@@ -13,11 +10,11 @@ from chainer import variable
 class InstanceNormalization(batch_normalization.BatchNormalization):
 
     """Instance normalization layer on outputs of convolution functions.
-    
+
     This link wraps the :func:`_chainer.functions.instance_normalization`.
-    
+
     It runs in three modes: training mode, fine-tuning mode, and testing mode.
-    
+
     In training mode, it normalizes the input by *instance statistics*. It
     does not maintain *population statistics*.
 
@@ -59,11 +56,10 @@ class InstanceNormalization(batch_normalization.BatchNormalization):
     avg_mean = None
     avg_var = None
 
-    def __init__(self, size=None, decay=0.9, eps-2e-5, dtype=None,
+    def __init__(self, size=None, decay=0.9, eps=2e-5, dtype=None,
                  use_gamma=False, use_beta=False,
                  initial_gamma=None, initial_beta=None,
                  track_statistics=False):
-        )
         self.track_statistics = track_statistics
 
         super(InstanceNormalization, self).__init__(
@@ -72,13 +68,13 @@ class InstanceNormalization(batch_normalization.BatchNormalization):
 
     def forward(self, x, **kwargs):
         """forward(self, x, finetune=False)
-        
+
         Invokes the forward propagation of InstanceNormalization
-        
+
         In training mode, the InstanceNormalization computes the moving
         averages of mean and variance for evaluation during training, and
         normalizes the input using the batch of statistics.
-        
+
         Args:
             x (Variable): Input variable.
             finetune (bool): If it is in the training mode and ``finetune`` is
@@ -86,7 +82,7 @@ class InstanceNormalization(batch_normalization.BatchNormalization):
                 accumulates the input array to compute population statistics
                 for normalization, and normalizes the input using the batch of
                 statistics.
-        
+
         """
         finetune = argument.parse_kwargs(
             kwargs, ('finetune', False),
@@ -118,6 +114,7 @@ class InstanceNormalization(batch_normalization.BatchNormalization):
                 decay = 1. - 1. / self.N
             else:
                 decay = self.decay
+            ret = functions.instance_normalization(x, gamma, beta, decay=decay, eps=self.eps, axis=self.axis)
         else:
             # Use running average statistics or fine-tuned statistics.
             mean = self.avg_mean
