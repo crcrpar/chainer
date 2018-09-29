@@ -36,21 +36,33 @@ class WeightNormalization(link_hook.LinkHook):
         axis (int): Axis of weight which represents input variable size.
         eps (int): Numerical stability in norm calculation.
 
+    .. admonition:: Example
+
+        >>> layer = L.Convolution2D(3, 5, 3, 1, 1)
+        >>> layer.add_hook(WeightNormalization())
+        >>> y = layer(np.random.uniform(-1, 1, (10, 3, 32, 32)).astype('f'))
+        >>> layer = L.Deconvolution2D(6, 3, 4, 2, 1)
+        >>> layer.add_hook(WeightNormalization(1))
+        >>> y = layer(np.random.uniform(-1, 1, (10, 6, 16, 16)).astype('f'))
+
     """
 
     name = 'WeightNormalization'
 
-    def __init__(self, axis=0, eps=1e-12):
+    def __init__(self, axis=0, eps=1e-12, name=None):
         self.axis = axis
         self.eps = eps
         self._initialied = False
 
+        if name is not None:
+            self.name = name
+
     def added(self, link):
-        if isinstance(link, (L.Deconvolution2D, L.DeconvolutionND)):
+        if isinstance(
+            link,
+            (L.Deconvolution1D, L.Deconvolution2D, L.Deconvolution3D, L.DeconvolutionND)):
             if self.axis == 0:
-                raise ValueError(
-                    "Wrong axis for {} instance".format(type(link))
-                )
+                raise ValueError("Wrong axis for Deconvolution layer.")
         self._prepare_parameters(link)
 
     def deleted(self, link):
