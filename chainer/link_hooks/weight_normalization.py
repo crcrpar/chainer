@@ -1,19 +1,28 @@
+import chainer
 from chainer import link_hook
+from chainer import functions as F
 from chainer import links as L
 from chainer import variable
 
 
-def _expander(ndim, axis):
+def _get_expander(ndim, axis):
     expander = [None] * ndim
     expander[axis] = Ellipsis
     return expander
 
 
-def _norm_axis(xp, weight, axis, eps=1e-12):
-    reduce_axes = tuple([i for i in range(weight.ndim) if i != axis])
-    squared_norm = xp.sum(weight * weight, axis=tuple(reduce_axes))
-    norm = xp.sqrt(squared_norm + eps)
+def _norm_axis(weight, reduce_axes, eps=1e-12, keepdims=True):
+    # reduce_axes = tuple([i for i in range(weight.ndim) if i != axis])
+    reduce_axes = tuple(reduce_axes)
+    squared_norm = F.sum(weight * weight, axis=reduce_axes, keepdims=keepdims)
+    norm = F.sqrt(squared_norm + eps)
     return norm
+
+
+def _expand_and_broadcast(var, expand_axes, shape):
+    for i in expand_axes:
+        var = F.expand_dims(var, i)
+    return F.broadcast_to(var, shape)
 
 
 class WeightNormalization(link_hook.LinkHook):
@@ -74,6 +83,7 @@ class WeightNormalization(link_hook.LinkHook):
         if not self._initialied:
             input_variable = cb_args.args[0]
             self._prepare_parameters(link, input_variable)
+            print('Initialized weights.')
 
         self._reparameterize_weight(link)
 
@@ -86,21 +96,22 @@ class WeightNormalization(link_hook.LinkHook):
                 return
             else:
                 link._initialize_params(input_variable.shape[1])
-        self._initialied = True
         W = link.W
-        link.g = variable.Parameter(
-            _norm_axis(link.xp, W.array, self.axis, self.eps))
-        link._V = W
-        ndim = W.ndim
-        expander = [None] * ndim
-        expander[self.axis] = Ellipsis
-        self.expander = expander
+        expander = _get_expander(W.ndim, self.axis)
+        self.expand_axes = tuple([i for i, d in enumerate(expander) if d is None])
+        with chainer.no_backprop_mode():
+            g_variable = _norm_axis(W, self.expand_axes, self.eps)
+        g = variable.Parameter(g_variable.array)
+        with link.init_scope():
+            link.g = g
+            link._V = W
+        self.shape = W.shape
+        print(self.shape, self.expand_axes)
+        self._initialied = True
 
     def _reparameterize_weight(self, link):
         weight = link._V
-        xp = link.xp
-
-        norm = _norm_axis(
-            xp, weight.array, self.axis, self.eps)[tuple(self.expander)]
-        normalized_weight = link.g[tuple(self.expander)] * weight / norm
-        link.W = normalized_weight
+        norm = _norm_axis(link._V, self.expand_axes, self.eps)
+        norm = F.broadcast_to(norm, self.shape)
+        g = F.broadcast_to(link.g, self.shape)
+        link.W = g * weight / norm

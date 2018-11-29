@@ -53,7 +53,7 @@ def update_approximate_vectors(
         first left singular vector `u` and right singular vector `v`.
 
     """
-    weight_matrix = weight_matrix.array
+    weight_matrix = weight_matrix.array  # No need to be backpropable.
     xp = backend.get_array_module(weight_matrix)
     for _ in range(n_power_iteration):
         v = l2normalize(xp, xp.dot(u, weight_matrix), eps)
@@ -65,12 +65,12 @@ def calculate_max_singular_value(weight_matrix, u, v):
     """Calculate max singular value by power iteration method.
 
     Args:
-        weight_matrix (chainer.Variable or chainer.Parameter):
+        weight_matrix (chainer.Variable or chainer.Parameter)
         u (numpy.ndarray or cupy.ndarray)
         v (numpy.ndarray or cupy.ndarray)
 
     Returns:
-        chainer.Variable of max singular sigma
+        chainer.Variable of max singular value sigma
 
     """
     sigma = F.sum(F.linear(u, F.transpose(weight_matrix)) * v)
