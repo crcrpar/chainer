@@ -438,7 +438,6 @@ class BatchNormalizationGrad(function_node.FunctionNode):
                     ''', 'bn_bwd')(gy, x_hat, gamma[expander],
                                    self.inv_std[expander], ggamma[expander],
                                    gbeta[expander], inv_m)
-        self.retain_inputs((0, 1, 2))
         self.retain_outputs((0, 1))
         return gx, ggamma, gbeta
 
