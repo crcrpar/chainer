@@ -14,12 +14,14 @@ from chainer import testing
 @testing.backend.inject_backend_tests(
     None,
     # CPU tests
-    [
-        {},
-    ]
+    testing.product({
+        'use_cuda': [False],
+        'use_ideep': ['never', 'always'],
+    })
     # GPU tests
     + testing.product({
         'use_cuda': [True],
+        'use_cudnn': ['never', 'always'],
         'cuda_device': [0, 1],
     })
     + testing.product({

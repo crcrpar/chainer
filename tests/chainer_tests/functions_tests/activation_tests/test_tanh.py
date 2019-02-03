@@ -12,12 +12,13 @@ from chainer import testing
 @testing.backend.inject_backend_tests(
     None,
     # CPU tests
-    [
-        {},
-    ]
+    testing.product({
+        'use_ideep': ['never', 'always']
+    })
     # GPU tests
     + testing.product({
         'use_cuda': [True],
+        'use_cudnn': ['never', 'always'],
         'cuda_device': [0, 1],
     })
     # ChainerX tests
@@ -33,7 +34,7 @@ class TestTanh(testing.FunctionTestCase):
         self.check_double_backward_options = {}
         if self.dtype == numpy.float16:
             self.check_backward_options = {'atol': 5e-4, 'rtol': 5e-3}
-            self.check_double_backward_options = {'atol': 5e-3, 'rtol': 5e-2}
+            self.check_double_backward_options = {'atol': 5e-4, 'rtol': 5e-3}
 
     def generate_inputs(self):
         x = numpy.random.uniform(-.5, .5, self.shape).astype(self.dtype)
