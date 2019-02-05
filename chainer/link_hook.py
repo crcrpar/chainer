@@ -1,3 +1,4 @@
+import collections
 import typing as tp  # NOQA
 
 import chainer
@@ -122,7 +123,11 @@ class LinkHook(object):
         name(str): Name of this link hook.
     """
 
+    _integrated_function_hooks = None  # type: tp.Optional[collections.OrderedDict[str, chainer.FunctionHook]]  # NOQA
     name = 'LinkHook'
+
+    def __init__(self):
+        pass
 
     def __enter__(self):
         # type: () -> LinkHook
@@ -200,3 +205,14 @@ class LinkHook(object):
                     Return value of the forward method.
         """
         pass
+
+    @property
+    def integrated_function_hooks(self):
+        if self._integrated_function_hooks is None:
+            self._integrated_function_hooks = collections.OrderedDict()
+        return self._integrated_function_hooks
+
+    @property
+    def _n_integrated_function_hooks(self):
+        return (0 if self._integrated_function_hooks is None
+                else len(self._integrated_function_hooks))

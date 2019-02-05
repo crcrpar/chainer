@@ -6,6 +6,7 @@ import time
 import numpy
 
 from chainer.backends import cuda
+from chainer import function_hooks
 from chainer import link_hook
 
 
@@ -59,6 +60,17 @@ class TimerHook(link_hook.LinkHook):
         self._running_stack = []
         self._depth = 0
         self._total_time = 0
+        self._integrated_call_history = []
+        self.key = 'timer_function_hook'
+
+    def added(self, link):
+        integrated_function_hooks = self.integrated_function_hooks
+        integrated_function_hooks[self.key] = function_hooks.TimerHook()
+        print(self._n_integrated_function_hooks)
+
+    def deleted(self, link):
+        self._integrated_call_history.append(
+            (self.key, self._integrated_function_hooks.pop(self.key)))
 
     def _preprocess(self):
         if self.xp is numpy:
@@ -70,6 +82,9 @@ class TimerHook(link_hook.LinkHook):
             stop = cuda.Event()
             start.record()
             self._running_stack.append((start, stop))
+        self.integrated_function_hooks[self.key].forward_preprocess(
+            link.
+        )
         self._depth += 1
 
     def forward_preprocess(self, args):
@@ -105,8 +120,11 @@ class TimerHook(link_hook.LinkHook):
         """Returns total elapsed time in seconds."""
         return self._total_time
 
-    def summary(self):
+    def summary(self, show_backward=False):
         """Returns a summary of time profiling in links.
+
+        Args:
+            show_backward (bool): If ``True``, a summary includes backward.
 
         Returns:
             A summarized dictionary whose keys are link names and
@@ -131,7 +149,7 @@ class TimerHook(link_hook.LinkHook):
             factor *= 1000.0
         return factor, 'ns'
 
-    def print_report(self, unit='auto', file=sys.stdout):
+    def print_report(self, unit='auto', show_backward=False, file=sys.stdout):
         """Prints a summary report of time profiling in links.
 
         Args:
@@ -140,6 +158,8 @@ class TimerHook(link_hook.LinkHook):
                 are supported. If `auto`, units of times are aligned to the
                 largest, and if `auto_foreach`, units of times are adjusted for
                 each element.
+            show_backward (bool): If ``True``, a summary report comes with
+                time profiling of backward. The default value is ``False``.
         """
         entries = [['LinkName', 'ElapsedTime', 'Occurrence']]
         auto_foreach = (unit == 'auto_foreach')
@@ -166,6 +186,3 @@ class TimerHook(link_hook.LinkHook):
             file.write(line)
             file.write('\n')
         file.flush()
-
-    # TODO(crcrpar): Support backward pre/post process.
-    # See https://github.com/chainer/chainer/issues/5197
