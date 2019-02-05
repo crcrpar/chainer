@@ -61,11 +61,6 @@ class TestNonparameterizedLinear(testing.FunctionTestCase):
             b = numpy.random.uniform(-1, 1, 2).astype(self.x_dtype)
             return x, W, b
 
-    def generate_grad_ouptuts(self, outputs_template):
-        gy = numpy.random.uniform(
-            -1, 1, self.batch_shape + (2,)).astype(self.x_dtype)
-        return gy,
-
     def forward_expected(self, inputs):
         x, W = inputs[:2]
         if self.n_batch_axes > 1:
