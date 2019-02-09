@@ -12,7 +12,6 @@ from chainer.testing import attr
 @testing.parameterize(*testing.product_dict(
     testing.product({
         'dtype': [numpy.float16, numpy.float32, numpy.float64],
-        # 'dtype': [numpy.float32],
     }),
     testing.product({
         'shape': [None, (2, 3), (2, 2, 3), (2, 2, 2, 3)],
