@@ -1,13 +1,13 @@
-import unittest
-
 import numpy
 
-import chainer
-from chainer.backends import cuda
 from chainer import functions
-from chainer import gradient_check
 from chainer import testing
-from chainer.testing import attr
+from chainer import utils
+
+
+def _sigmoid(x):
+    half = x.dtype.type(0.5)
+    return numpy.tanh(x * half) * half + half
 
 
 @testing.parameterize(*testing.product_dict(
@@ -23,72 +23,46 @@ from chainer.testing import attr
     ]
 ))
 @testing.fix_random()
-class TestSwish(unittest.TestCase):
+@testing.inject_backend_tests(
+    None,
+    # CPU tests
+    [
+        {}
+    ]
+    # GPU tests
+    + testing.product({
+        'use_cuda': [True],
+        'cuda_device': [0, 1],
+    })
+    # ChainerX tests
+    + testing.product({
+        'use_chainerx': [True],
+        'chainerx_device': ['native:0', 'cuda:1', 'cuda:1'],
+    })
+)
+class TestSwish(testing.FunctionTestCase):
 
     def setUp(self):
-        self.x = numpy.random.uniform(-1, 1, self.x_shape).astype(self.dtype)
-        self.beta = numpy.random.uniform(-1, 1, self.beta_shape)\
-            .astype(self.dtype)
-        self.gy = numpy.random.uniform(-1, 1, self.x_shape).astype(self.dtype)
-        self.ggx = numpy.random.uniform(-1, 1, self.x_shape).astype(self.dtype)
-        self.ggb = numpy.random.uniform(-1, 1, self.beta_shape)\
-            .astype(self.dtype)
-
-        self.check_backward_options = {}
-        self.check_double_backward_options = {}
         if self.dtype == numpy.float16:
             self.check_backward_options = {'atol': 5e-4, 'rtol': 5e-3}
             self.check_double_backward_options = {'atol': 5e-3, 'rtol': 5e-2}
 
-    def check_forward(self, x_data, beta_data):
-        x = chainer.Variable(x_data)
-        beta = chainer.Variable(beta_data)
-        y = functions.swish(x, beta)
-        self.assertEqual(y.data.dtype, self.dtype)
+    def generate_inputs(self):
+        x = numpy.random.uniform(-1, 1, self.x_shape).astype(self.dtype)
+        beta = numpy.random.uniform(-1, 1, self.beta_shape).astype(self.dtype)
+        return x, beta
 
-        beta = chainer.functions.broadcast_to(beta.reshape(
-            self.extended_beta_shape), x.shape)
-        y_expect = x * chainer.functions.sigmoid(beta * x)
-        testing.assert_allclose(y_expect.data, y.data)
+    def forward(self, inputs, device):
+        x, beta = inputs
+        return functions.swish(x, beta),
 
-    def test_forward_cpu(self):
-        self.check_forward(self.x, self.beta)
-
-    @attr.gpu
-    def test_forward_gpu(self):
-        self.check_forward(cuda.to_gpu(self.x), cuda.to_gpu(self.beta))
-
-    def check_backward(self, x_data, beta_data, gy_data):
-        gradient_check.check_backward(
-            functions.swish, (x_data, beta_data), gy_data,
-            dtype=numpy.float64,
-            **self.check_backward_options)
-
-    def test_backward_cpu(self):
-        self.check_backward(self.x, self.beta, self.gy)
-
-    @attr.gpu
-    def test_backward_gpu(self):
-        self.check_backward(cuda.to_gpu(self.x), cuda.to_gpu(self.beta),
-                            cuda.to_gpu(self.gy))
-
-    def check_double_backward(self, x_data, beta_data, gy_data,
-                              ggx_data, ggb_data):
-        gradient_check.check_double_backward(
-            functions.swish, (x_data, beta_data), gy_data,
-            (ggx_data, ggb_data), dtype=numpy.float64,
-            **self.check_double_backward_options)
-
-    def test_double_backward_cpu(self):
-        self.check_double_backward(self.x, self.beta, self.gy,
-                                   self.ggx, self.ggb)
-
-    @attr.gpu
-    def test_double_backward_gpu(self):
-        self.check_double_backward(
-            cuda.to_gpu(self.x), cuda.to_gpu(self.beta),
-            cuda.to_gpu(self.gy), cuda.to_gpu(self.ggx),
-            cuda.to_gpu(self.ggb))
+    def forward_expected(self, inputs):
+        x, beta = inputs
+        beta = numpy.broadcast_to(
+            numpy.reshape(beta, self.extended_beta_shape),
+            x.shape)
+        y = x * _sigmoid(beta * x)
+        return utils.force_array(y, dtype=self.dtype),
 
 
 testing.run_module(__name__, __file__)
