@@ -159,6 +159,8 @@ class AveragePoolingND(pooling_nd._PoolingND):
 
 class AveragePoolingNDGrad(function_node.FunctionNode):
 
+    # FIXME(crcrpar): forward_cpu & forward_gpu with self.pad_value == `None`
+
     def __init__(self, apoolnd):
         self.ndim = apoolnd.ndim
         self.ksize = apoolnd.ksize
@@ -182,7 +184,7 @@ class AveragePoolingNDGrad(function_node.FunctionNode):
         gcol = numpy.tile(gy[gy_index], gcol_reps)
         gx = conv_nd.col2im_nd_cpu(gcol, self.stride, self.pad, idims)
         if self.pad_value is None:
-            width = self._get_pooling_width(numpy, odims, gx.dtype)
+            width = self.apoolnd._get_pooling_width(numpy, odims, gx.dtype)
             numpy.divide(gx, width, out=gx)
         else:
             gx /= functools.reduce(operator.mul, self.ksize)
@@ -199,7 +201,7 @@ class AveragePoolingNDGrad(function_node.FunctionNode):
         odims = gy.shape[2:]
         gx = cuda.cupy.empty(self._in_shape, self._in_dtype)
         if self.pad_value is None:
-            coeff = self._get_pooling_width(cuda.cupy, odims, gy.dtype)
+            coeff = self.apoolnd._get_pooling_width(cuda.cupy, odims, gy.dtype)
             coeff = cuda.cupy.reciprocal(coeff, out=coeff)
         else:
             coeff = 1. / functools.reduce(operator.mul, self.ksize)

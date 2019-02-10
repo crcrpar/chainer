@@ -21,6 +21,88 @@ from chainer_tests.functions_tests.pooling_tests import pooling_nd_helper
     'dims': [(4,), (4, 3), (4, 3, 2), (1, 1, 1, 1)],
     'dtype': [numpy.float16, numpy.float32, numpy.float64],
     'pad_value': [None, 0],
+    'contiguous': [None, 'C'],
+}))
+@testing.backend.inject_backend_tests(
+    ['test_forward', 'test_backward', 'test_double_backward'],
+    # CPU tests
+    testing.product({
+        'use_cuda': [False],
+        'use_ideep': ['never', 'always'],
+    })
+    # GPU tests
+    + testing.product({
+        'use_cuda': [True],
+        'use_cudnn': ['never', 'always'],
+    })
+    # ChainerX tests
+    + [
+        {'use_chainerx': True, 'chainerx_device': 'native:0'},
+        {'use_chainerx': True, 'chainerx_device': 'cuda:0'},
+    ]
+)
+class TestAvgPoolingND(testing.FunctionTestCase):
+
+    def setUp(self):
+        self.ndim = len(self.dims)
+        self.ksize = (3,) * self.ndim
+        self.stride = (2,) * self.ndim
+        self.pad = (1,) * self.ndim
+
+        self.input_shape = (2, 3) + self.dims
+        outs = tuple(conv.get_conv_outsize(d, k, s, p, False)
+                     for (d, k, s, p) in six.moves.zip(
+                         self.dims, self.ksize, self.stride, self.pad))
+        self.output_shape = (2, 3) + outs
+
+        self.check_backward_options = {'eps': 1e-2}
+        if self.dtype == numpy.float16:
+            self.check_forward_options = {'atol': 5e-4, 'rtol': 5e-3}
+            self.check_backward_options = {
+                'eps': 1e-2, 'atol': 5e-3, 'rtol': 5e-2}
+            self.check_double_backward_options = {'atol': 5e-4, 'rtol': 5e-3}
+
+    def generate_inputs(self):
+        x = numpy.random.uniform(-1, 1, self.input_shape).astype(self.dtype)
+        return x,
+
+    def forward(self, inputs, device):
+        x, = inputs
+        y = functions.average_pooling_nd(
+            x, self.ksize, self.stride, self.pad, self.pad_value)
+        return y,
+
+    def forward_expected(self, inputs):
+        x, = inputs
+        patches = pooling_nd_helper.pooling_patches(
+            self.dims, self.ksize, self.stride, self.pad, False)
+
+        def denom(idx):
+            if self.pad_value is None:
+                s = 1
+                for slic in idx:
+                    s *= slic.stop - slic.start
+                return s
+            else:
+                return functools.reduce(operator.mul, self.ksize)
+
+        y = []
+        for k in six.moves.range(2):
+            tmp = []
+            for c in six.moves.range(3):
+                x_ = x[k, c]
+                expect = numpy.array(
+                    [x_[idx].sum() / denom(idx) for idx in patches])
+                expect = expect.reshape(self.output_shape[2:])
+                tmp.append(expect)
+            y.append(tmp)
+        return numpy.asarray(y).astype(self.dtype),
+
+
+@testing.parameterize(*testing.product({
+    'dims': [(4,), (4, 3), (4, 3, 2), (1, 1, 1, 1)],
+    'dtype': [numpy.float16, numpy.float32, numpy.float64],
+    'pad_value': [None, 0],
 }))
 class TestAveragePoolingND(unittest.TestCase):
 
