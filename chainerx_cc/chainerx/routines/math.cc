@@ -536,6 +536,27 @@ Array Tanh(const Array& x) {
     return out;
 }
 
+Array Relu(const Array& x) {
+  Array out = EmptyLike(x, x.device());
+
+  {
+    NoBackpropModeScope scope{};
+    x.device().Relu(x, out);
+  }
+
+  BackwardBuilder bb{"relu", x, out};
+  if (BackwardBuilder::Target bt = bb.CreateTarget(0)) {
+    bt.Define([out_tok = bb.RetainOutput(0)](BackwardContext bctx) {
+        const Array& gout = *bctx.output_grad();
+        const Array& out = bctx.GetRetainedOutput(out_tok);
+        bctx.input_grad() = gout * (out > 0).AsType(x.dtype());
+        });
+  }
+  bb.Finalize();
+
+  return out;
+}
+
 Array IsNan(const Array& x) {
     Array out = Empty(x.shape(), Dtype::kBool, x.device());
     {

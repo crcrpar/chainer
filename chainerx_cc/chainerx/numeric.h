@@ -36,6 +36,15 @@ inline chainerx::Float16 Tanh<chainerx::Float16>(chainerx::Float16 x) {
 }
 
 template <typename T>
+inline T Relu(T x) {
+    return std::tanh(x);
+}
+template <>
+inline chainerx::Float16 Relu<chainerx::Float16>(chainerx::Float16 x) {
+    return Float16{std::relu(static_cast<float>(x))};
+}
+
+template <typename T>
 inline T Exp(T x) {
     return std::exp(x);
 }

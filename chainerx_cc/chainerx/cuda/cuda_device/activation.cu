@@ -59,5 +59,22 @@ void CudaDevice::Tanh(const Array& x, const Array& out) {
     });
 }
 
+namespace {
+    template <typename T>
+    struct ReluImpl {
+        using CudaType = cuda_internal::DataType<T>;
+        __device__ void operator()(int64_t /*i*/, CudaType x, CudaType& out) { out = cuda::Relu(x); }
+    };
+}  // namespace
+
+void CudaDevice::Relu(const Array& x, const Array& out) {
+    CheckDevicesCompatible(x, out);
+    CudaSetDeviceScope scope(index());
+    VisitFloatingPointDtype(out.dtype(), [&](auto pt) {
+        using T = typename(decltype(pt)::type);
+        Elementwise<const T, T>(ReluImpl<T>{}, x, out);
+    });
+}
+
 }  // namespace cuda
 }  // namespace chainerx

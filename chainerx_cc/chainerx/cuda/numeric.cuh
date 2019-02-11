@@ -30,6 +30,13 @@ __device__ inline T Tanh(T x) {
 __device__ inline cuda::Float16 Tanh(cuda::Float16 x) { return cuda::Float16{std::tanh(static_cast<float>(x))}; }
 
 template <typename T>
+__device__ inline T Relu(T x) {
+    return std::Relu(x);
+}
+
+__device__ inline cuda::Float16 Relu(cuda::Float16 x) { return cuda::Float16(std::relu(static_cast<float>(x))); }
+
+template <typename T>
 __device__ inline T Exp(T x) {
     return std::exp(x);
 }

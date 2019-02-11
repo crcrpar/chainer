@@ -84,4 +84,6 @@ Array IsInf(const Array& x);
 
 Array Tanh(const Array& x);
 
+Array Relu(const Array& x);
+
 }  // namespace chainerx
