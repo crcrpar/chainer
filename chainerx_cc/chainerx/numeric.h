@@ -37,7 +37,7 @@ inline chainerx::Float16 Tanh<chainerx::Float16>(chainerx::Float16 x) {
 
 template <typename T>
 inline T Relu(T x) {
-    return std::tanh(x);
+    return chainerx::Maximum(x, 0);
 }
 template <>
 inline chainerx::Float16 Relu<chainerx::Float16>(chainerx::Float16 x) {
