@@ -102,10 +102,12 @@ class FunctionAdapter(function_node.FunctionNode):
 
     """
 
-    _function = None
-    _weak_function = None
+    _function = None  # type: Function
+    _weak_function = None  # type: weakref.ReferenceType[Function]
 
     def __init__(self, function):
+        # type: (Function) -> None
+
         super(FunctionAdapter, self).__init__()
         self._weak_function = weakref.ref(function)
         function._owned_node = self
@@ -148,7 +150,7 @@ class FunctionAdapter(function_node.FunctionNode):
         for retained, i_in in six.moves.zip(
                 retained_inputs, self._input_indexes_to_retain):
             inputs[i_in] = retained
-            in_data[i_in] = retained.array
+            in_data[i_in] = None if retained is None else retained.array
         in_data = tuple(in_data)
 
         grad_out_data = tuple([None if grad is None else grad.data
@@ -247,11 +249,9 @@ class Function(object):
         behavior of building the computational graph.
 
         Args:
-            inputs: Tuple of input :class:`Variable`, :class:`numpy.ndarray` or
-                :class:`cupy.ndarray` objects.
-                If the input is an :class:`numpy.ndarray` or a
-                :class:`cupy.ndarray`, it is automatically wrapped with
-                :class:`Variable`.
+            inputs: Tuple of input :class:`Variable` or :ref:`ndarray` objects.
+                If the input is :ref:`ndarray`, it is automatically wrapped
+                with :class:`Variable`.
 
         Returns:
             One :class:`Variable` object or a tuple of multiple

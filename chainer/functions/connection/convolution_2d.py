@@ -13,7 +13,7 @@ from chainer.utils import type_check
 import chainerx
 
 if cuda.cudnn_enabled:
-    _cudnn_version = cuda.cuda.cudnn.getVersion()
+    _cudnn_version = cuda.cuda.cudnn.getVersion()  # type: ignore
 
 
 def _pair(x):
@@ -440,7 +440,8 @@ class Convolution2DGradW(function_node.FunctionNode):
 
 
 def convolution_2d(x, W, b=None, stride=1, pad=0, cover_all=False, **kwargs):
-    """convolution_2d(x, W, b=None, stride=1, pad=0, cover_all=False, *, dilate=1, groups=1)
+    """convolution_2d(x, W, b=None, stride=1, pad=0, cover_all=False, *, \
+dilate=1, groups=1)
 
     Two-dimensional convolution function.
 
@@ -565,7 +566,7 @@ cover_all=True)
         >>> y.shape == (n, c_o, h_o, w_o + 1)
         True
 
-    """  # NOQA
+    """
     dilate, groups = argument.parse_kwargs(
         kwargs, ('dilate', 1), ('groups', 1),
         deterministic="deterministic argument is not supported anymore. "

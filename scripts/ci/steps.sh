@@ -143,7 +143,6 @@ step_cmake() {
         -DCHAINERX_BUILD_PYTHON=OFF \
         -DCHAINERX_WARNINGS_AS_ERRORS=ON \
         -DCMAKE_INSTALL_PREFIX="$WORK_DIR"/install_target \
-        -DCHAINERX_CUDA_MULTITHREAD_TEST_SEGV_WORKAROUND=ON \
         "$CHAINERX_DIR"
     popd
 }
@@ -199,28 +198,6 @@ step_python_test_chainerx() {
         --cov-fail-under=50 \
         --cov-report html:"$WORK_DIR"/coverage-html/python \
         "$REPO_DIR"/tests/chainerx_tests
-}
-
-
-step_python_test_chainerx_nocuda() {
-    source activate testenv
-
-    # Run all non-CUDA tests except doctests
-    # TODO(niboshi): threshold is temporarily lowered from 80 to 50. Restore it after writing tests for testing package.
-
-    COVERAGE_FILE="$WORK_DIR"/coverage-data \
-    pytest \
-        -m='not cuda' \
-        -p no:doctest \
-        --showlocals \
-        --cov=chainerx \
-        --no-cov-on-fail \
-        --cov-fail-under=50 \
-        --cov-report html:"$WORK_DIR"/coverage-html/python \
-        "$REPO_DIR"/tests/chainerx_tests
-
-    # Run all non-CUDA doctests
-    find "$REPO_DIR"/tests/chainerx_tests/acceptance_tests -name '*.rst' -not -name '*_cuda.rst' -print0 | xargs -0 pytest
 }
 
 

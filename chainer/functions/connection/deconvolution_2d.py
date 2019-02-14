@@ -13,7 +13,7 @@ from chainer.utils import type_check
 import chainerx
 
 if cuda.cudnn_enabled:
-    _cudnn_version = cuda.cuda.cudnn.getVersion()
+    _cudnn_version = cuda.cuda.cudnn.getVersion()  # type: ignore
 
 
 def _pair(x):
@@ -327,7 +327,8 @@ class Deconvolution2DFunction(function_node.FunctionNode):
 
 
 def deconvolution_2d(x, W, b=None, stride=1, pad=0, outsize=None, **kwargs):
-    """deconvolution_2d(x, W, b=None, stride=1, pad=0, outsize=None, *, dilate=1, groups=1)
+    """deconvolution_2d(x, W, b=None, stride=1, pad=0, outsize=None, *, \
+dilate=1, groups=1)
 
     Two dimensional deconvolution function.
 
@@ -428,7 +429,7 @@ astype(np.float32)
         True
 
 
-    """  # NOQA
+    """
     argument.check_unexpected_kwargs(
         kwargs, deterministic="deterministic argument is not "
         "supported anymore. "

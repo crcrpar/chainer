@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
+# This script defines the matrices in Travis CI.
 set -eux
 
+this_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 phase="$1"
 
@@ -18,65 +20,143 @@ esac
 # Assign default values
 : "${MATRIX_EVAL:=}"
 : "${SKIP_CHAINERX:=0}"
+: "${SKIP_CHAINERMN:=0}"
+: "${CHAINER_TEST_STATUS:=0}"
+
+REPO_DIR="$TRAVIS_BUILD_DIR"
+WORK_DIR="$TRAVIS_BUILD_DIR"/_workspace
+mkdir -p "$WORK_DIR"
+
+# Env script which is sourced before each step
+CHAINER_BASH_ENV="$WORK_DIR"/_chainer_bash_env
+touch "$CHAINER_BASH_ENV"
+source "$CHAINER_BASH_ENV"
+
+export REPO_DIR
+export WORK_DIR
+export CHAINER_BASH_ENV
+
+
+run_prestep() {
+    # Failure immediately stops the script.
+    bash "$this_dir"/run-step.sh "$@"
+}
+
+
+run_step() {
+    # In case of failure, CHAINER_TEST_STATUS is incremented by 1.
+    bash "$this_dir"/run-step.sh "$@" || CHAINER_TEST_STATUS=$((CHAINER_TEST_STATUS + 1))
+}
 
 
 case "${CHAINER_TRAVIS_TEST}" in
+    "python-static-check")
+        case "$phase" in
+            before_install)
+            ;;
+            install)
+                run_prestep install_chainer_style_check_deps
+            ;;
+            script)
+                run_step python_style_check
+            ;;
+        esac
+        ;;
+
+    "c-static-check")
+        case "$phase" in
+            before_install)
+                run_prestep before_install_chainerx_style_check_deps
+            ;;
+            install)
+                run_prestep install_chainerx_style_check_deps
+
+                run_prestep chainerx_cmake  # cmake is required for clang-tidy
+            ;;
+            script)
+                run_step chainerx_cpplint
+                run_step chainerx_clang_format
+
+                run_step chainerx_clang_tidy normal
+                run_step chainerx_clang_tidy test
+            ;;
+        esac
+        ;;
+
     "chainer")
         case "$phase" in
             before_install)
                 eval "${MATRIX_EVAL}"
-                # Remove oclint as it conflicts with GCC (indirect dependency of hdf5)
-                if [[ $TRAVIS_OS_NAME = "osx" ]]; then
-                    brew update >/dev/null;
-                    brew outdated pyenv || brew upgrade --quiet pyenv;
+                run_prestep before_install_chainer_test
 
-                    PYTHON_CONFIGURE_OPTS="--enable-unicode=ucs2" pyenv install -ks $PYTHON_VERSION;
-                    pyenv global $PYTHON_VERSION;
-                    python --version;
+                if [[ $SKIP_CHAINERMN != 1 ]]; then
+                    run_prestep before_install_chainermn_test_deps
+                fi
 
-                    brew cask uninstall oclint;
-                    brew install hdf5;
-                    brew install open-mpi;
+                if [[ $TRAVIS_OS_NAME == "windows" ]]; then
+                    choco install python3
+
+                    export PATH="/c/Python37:/c/Python37/Scripts:$PATH"
+                    echo 'export PATH="/c/Python37:/c/Python37/Scripts:$PATH"' >> $CHAINER_BASH_ENV
+
+                    python -m pip install -U pip
                 fi
                 ;;
 
             install)
                 pip install -U pip wheel
-                pip install mpi4py
-                python setup.py sdist
-                if [[ $SKIP_CHAINERX != 1 ]]; then
-                    export CHAINER_BUILD_CHAINERX=1;
+
+                run_prestep install_chainer_test_deps
+                run_prestep install_chainer_docs_deps
+
+                if [[ $SKIP_CHAINERMN != 1 ]]; then
+                    run_prestep install_chainermn_test_deps
                 fi
-                MAKEFLAGS=-j2
-                pip install dist/*.tar.gz
-                MAKEFLAGS=-j2
-                pip install -U -e .[travis]
+
+                run_prestep chainer_install_from_sdist
                 ;;
 
             script)
-                flake8
-                autopep8 -r . --diff --exit-code
-                # To workaround Travis issue (https://github.com/travis-ci/travis-ci/issues/7261),
-                # ignore DeprecationWarning raised in `site.py`.
-                python -Werror::DeprecationWarning -Wignore::DeprecationWarning:site -m compileall -f -q chainer chainermn examples tests docs
-                pushd tests
-                pytest -m "not slow and not gpu and not cudnn and not ideep" chainer_tests
-                export OMP_NUM_THREADS=1
-                (for NP in 1 2; do mpiexec -n ${NP} pytest -s -v -m 'not gpu and not slow' chainermn_tests || exit $?; done)
-                popd
-                if [[ $TRAVIS_OS_NAME == "linux" ]]; then
-                    python setup.py develop;
+                run_step chainer_tests
+
+                if [[ $SKIP_CHAINERMN != 1 ]]; then
+                    run_step chainermn_tests
                 fi
+
                 if [[ $SKIP_CHAINERX != 1 ]]; then
-                    make -C docs html;
+                    CHAINERX_TEST_CUDA_DEVICE_LIMIT=0 \
+                        run_step chainerx_python_tests
+                fi
+
+                if [[ $SKIP_CHAINERX != 1 ]]; then
+                    CHAINER_DOCS_SKIP_LINKCODE=1 \
+                        run_step docs
                 else
                     echo "Documentation build is skipped as ChainerX is not available.";
                 fi
                 ;;
         esac
         ;;
+
+    "chainerx-cpp")
+        case "$phase" in
+            before_install)
+            ;;
+            install)
+                run_prestep chainerx_cmake
+                run_prestep chainerx_make
+            ;;
+            script)
+                run_step chainerx_ctest
+            ;;
+        esac
+        ;;
+
     *)
         echo "Unknown value of CHAINER_TRAVIS_TEST: ${CHAINER_TRAVIS_TEST}" >&2
         exit 1
         ;;
 esac
+
+# In "script" phases, the number of failed steps is assigned to this variable.
+exit $CHAINER_TEST_STATUS
