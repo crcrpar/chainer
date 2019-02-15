@@ -61,8 +61,9 @@ def group_normalization(x, groups, gamma, beta, eps=1e-5):
     x = reshape.reshape(x, (1, batch_size * groups, -1, 1))
 
     with cuda.get_device_from_array(x.array):
-        dummy_gamma = xp.ones(batch_size * groups).astype(xp.float32)
-        dummy_beta = xp.zeros(batch_size * groups).astype(xp.float32)
+        dtype = x.dtype
+        dummy_gamma = xp.ones(batch_size * groups).astype(dtype)
+        dummy_beta = xp.zeros(batch_size * groups).astype(dtype)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
