@@ -45,6 +45,10 @@ def _simple_group_normalization(x, groups, gamma, beta, eps=1e-5):
         'cudnn_fast_batch_normalization': [True, False],
         'cuda_device': [0, 1],
     })
+    + testing.product({
+        'use_chainerx': [True],
+        'chainerx_device': ['native:0', 'cuda:0'],
+    })
 )
 class TestGroupNormalization(testing.FunctionTestCase):
 
