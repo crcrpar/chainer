@@ -1,5 +1,4 @@
 import six
-import unittest
 
 import numpy
 
@@ -66,7 +65,7 @@ class TestGroupNormalization(testing.FunctionTestCase):
         self.check_double_backward_options = {
             'atol': 1e-3, 'rtol': 1e-2, 'eps': 1e-2}
         if self.dtype == numpy.float16:
-            self.check_forward_options = {'atol': 1e-4, 'rtol': 1e-3}
+            self.check_forward_options = {'atol': 1e-2, 'rtol': 1e-3}
             self.check_backward_options = {
                 'atol': 1e-3, 'rtol': 1e-2, 'eps': 1e-2}
             self.check_double_backward_options = {
