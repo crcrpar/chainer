@@ -157,7 +157,7 @@ class MaxPooling2DGrad(function_node.FunctionNode):
         gcol = numpy.zeros(
             (n * c * out_h * out_w * kh * kw), dtype=self._in_dtype)
 
-        if not isinstance(self.indexes, numpy.ndarray):
+        if isinstance(self.indexes, intel64.ideep.mdarray):
             indexes = self.indexes.flatten().astype(numpy.int64)
         else:
             indexes = self.indexes.flatten()
