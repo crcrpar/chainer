@@ -5,9 +5,8 @@ import numpy
 import chainer
 from chainer.backends import cuda
 from chainer import functions
-from chainer import gradient_check
 from chainer import testing
-from chainer.testing import attr
+from chainer.testing.function import FunctionTestError
 
 
 def sigmoid(x):
@@ -34,404 +33,197 @@ def _wrap_variable(x):
         return chainer.Variable(x)
 
 
-class TestNStepGRU(unittest.TestCase):
+def _gen_uniform(shape, dtype):
+    return numpy.random.uniform(-1, 1, shape).astype(dtype)
+
+
+class BaseTestNStepGRU(object):
 
     batches = [3, 2, 1]
-    length = len(batches)
+    n_layers = 3
     in_size = 3
     out_size = 2
-    n_layers = 2
     dropout = 0.0
 
-    def setUp(self):
-        self.xs = [numpy.random.uniform(-1, 1, (b, self.in_size)).astype('f')
-                   for b in self.batches]
-        h_shape = (self.n_layers, self.batches[0], self.out_size)
-        self.hx = numpy.random.uniform(-1, 1, h_shape).astype(numpy.float32)
+    def generate_inputs(self):
+        xs = [
+            _gen_uniform((b, self.in_size), self.x_dtype) for b in self.batches
+        ]
+        hx = _gen_uniform(self.h_shape, self.x_dtype)
+        inputs = [hx] + xs
+        return tuple(inputs)
 
-        self.ws = []
-        self.bs = []
+    def generate_grad_outputs(self, outputs_template):
+        dys = [
+            _gen_uniform((b, self.out_size), self.x_dtype)
+            for b in self.batches
+        ]
+        dhy = _gen_uniform(self.h_shape, self.x_dtype)
+        return tuple([dhy] + dys)
+
+    def _send_weights(self, arrays, device):
+        if isinstance(device, chainer.testing.backend.BackendConfig):
+            f = device.get_array
+        else:
+            f = device.send
+        return [[f(a) for a in arr] for arr in arrays]
+
+    def _forward_util(self, inputs, device):
+        hx, *xs = inputs
+        ws = self._send_weights(self.ws, device)
+        bs = self._send_weights(self.bs, device)
+        hy, ys = functions.n_step_gru(
+            self.n_layers, self.dropout, hx, ws, bs, xs)
+        return hy, ys
+
+    def forward(self, inputs, device):
+        hy, ys = self._forward_util(inputs, device)
+        ys_concat = functions.concat(ys, 0)
+        return hy, ys_concat
+
+    def forward_expected(self, inputs):
+        hx, *xs = inputs
+        hx = numpy.copy(hx)
+        ws, bs = self.ws, self.bs
+        y_expected = []
+        for ind in range(self.length):
+            x = xs[ind]
+            batch = x.shape[0]
+            for layer in range(self.n_layers):
+                w, b = ws[layer], bs[layer]
+                h_prev = hx[layer, :batch]
+                # GRU
+                z = sigmoid(x.dot(w[1].T) + h_prev.dot(w[4].T) + b[1] + b[4])
+                r = sigmoid(x.dot(w[0].T) + h_prev.dot(w[3].T) + b[0] + b[3])
+                h_bar = numpy.tanh(
+                    x.dot(w[2].T) + r * ((h_prev).dot(w[5].T) + b[5]) + b[2])
+                e_h = (1 - z) * h_bar + z * h_prev
+                hx[layer, :batch] = e_h
+                x = e_h
+            y_expected.append(x)
+        y_concat = numpy.concatenate(y_expected, 0)
+        return hx, y_concat
+
+    def run_test_backward(self, backend_config):
+        # Runs the backward test.
+        if self.skip_backward_test:
+            raise unittest.SkipTest('skip_backward_test is set')
+
+        # avoid cyclic import
+        from chainer import gradient_check
+
+        self.backend_config = backend_config
+        self.before_test('test_backward')
+
+        def f(*args):
+            hy, ys = self._forward_util(args, backend_config)
+            return (hy,) + ys
+
+        def do_check():
+            inputs = self._generate_inputs()
+            outputs = self._forward_expected(inputs)
+            grad_outputs = self._generate_grad_outputs(outputs)
+
+            inputs = backend_config.get_array(inputs)
+            grad_outputs = backend_config.get_array(grad_outputs)
+            inputs = self._to_noncontiguous_as_needed(inputs)
+            grad_outputs = self._to_noncontiguous_as_needed(grad_outputs)
+            dhy, *dys = grad_outputs
+
+            with FunctionTestError.raise_if_fail(
+                    'backward is not implemented correctly'):
+                gradient_check.check_backward(
+                    f, inputs, grad_outputs, dtype=numpy.float64,
+                    detect_nondifferentiable=self.dodge_nondifferentiable,
+                    **self.check_backward_options)
+
+        do_check()
+
+
+@testing.parameterize(*testing.product({
+    'x_dtype': [numpy.float32],
+    'W_dtype': [numpy.float32],
+}))
+@testing.inject_backend_tests(
+    ['test_forward', 'test_backward'],
+    # CPU tests
+    [{}]
+    # GPU tests
+    + testing.product({
+        'use_cuda': [True],
+        'use_cudnn': ['never', 'always'],
+        'cuda_device': [0, 1],
+    })
+)
+class TestNStepGRU(testing.FunctionTestCase, BaseTestNStepGRU):
+
+    skip_double_backward_test = True
+
+    def setUp(self):
+        self.length = len(self.batches)
+        self.h_shape = (self.n_layers, self.batches[0], self.out_size)
+        self._prepare_weights()
+        self.check_forward_options.update({'atol': 1e-4, 'rtol': 1e-4})
+        self.check_backward_options.update({'atol': 1e-3, 'rtol': 1e-3})
+
+    def _prepare_weights(self):
+        out_size, W_dtype, x_dtype = self.out_size, self.W_dtype, self.x_dtype
+        ws, bs = [], []
         for i in range(self.n_layers):
-            weights = []
-            biases = []
+            weights, biases = [], []
             for j in range(6):
                 if i == 0 and j < 3:
                     w_in = self.in_size
                 else:
                     w_in = self.out_size
-
-                weights.append(numpy.random.uniform(
-                    -1, 1, (self.out_size, w_in)).astype('f'))
-                biases.append(numpy.random.uniform(
-                    -1, 1, (self.out_size,)).astype('f'))
-            self.ws.append(weights)
-            self.bs.append(biases)
-
-        self.dys = [numpy.random.uniform(-1, 1, (b, self.out_size)).astype('f')
-                    for b in self.batches]
-        self.dhy = numpy.random.uniform(-1, 1, h_shape).astype(numpy.float32)
-
-    def check_forward(self, h_data, xs_data, ws_data, bs_data):
-        h = _wrap_variable(h_data)
-        xs = _wrap_variable(xs_data)
-        ws = _wrap_variable(ws_data)
-        bs = _wrap_variable(bs_data)
-        hy, ys = functions.n_step_gru(
-            self.n_layers, self.dropout, h, ws, bs, xs)
-
-        e_hy = self.hx.copy()
-        for ind in range(self.length):
-            x = self.xs[ind]
-            batch = x.shape[0]
-            for layer in range(self.n_layers):
-                w = self.ws[layer]
-                b = self.bs[layer]
-                h_prev = e_hy[layer, :batch]
-
-                # GRU
-                z = sigmoid(x.dot(w[1].T) + h_prev.dot(w[4].T) + b[1] + b[4])
-                r = sigmoid(x.dot(w[0].T) + h_prev.dot(w[3].T) + b[0] + b[3])
-                h_bar = numpy.tanh(x.dot(w[2].T) +
-                                   r *
-                                   ((h_prev).dot(w[5].T) + b[5]) + b[2])
-                e_h = (1 - z) * h_bar + z * h_prev
-                e_hy[layer, :batch] = e_h
-
-                x = e_h
-
-            testing.assert_allclose(
-                ys[ind].data, x, rtol=1e-4, atol=1e-4)
-
-        testing.assert_allclose(hy.data, e_hy, rtol=1e-4, atol=1e-4)
-
-    def test_forward_cpu(self):
-        self.check_forward(self.hx, self.xs, self.ws, self.bs)
-
-    def check_forward_gpu(self, use_cudnn):
-        with chainer.using_config('use_cudnn', use_cudnn):
-            self.check_forward(
-                _to_gpu(self.hx),
-                _to_gpu(self.xs),
-                _to_gpu(self.ws),
-                _to_gpu(self.bs))
-
-    @attr.gpu
-    def test_forward_gpu_cudnn_always(self):
-        self.check_forward_gpu('always')
-
-    @attr.gpu
-    def test_forward_gpu_cudnn_auto(self):
-        self.check_forward_gpu('auto')
-
-    @attr.gpu
-    def test_forward_gpu_cudnn_never(self):
-        self.check_forward_gpu('never')
-
-    def check_backward(self, h_data, xs_data, ws_data, bs_data,
-                       dhy_data, dys_data):
-        args = tuple([h_data, ] + sum(ws_data, []) + sum(bs_data, []) +
-                     xs_data)
-        grads = tuple([dhy_data, ] + dys_data)
-
-        def f(*inputs):
-            (hx, ), inputs = _split(inputs, 1)
-            ws = []
-            for i in range(self.n_layers):
-                weights, inputs = _split(inputs, 6)
-                ws.append(weights)
-            bs = []
-            for i in range(self.n_layers):
-                biases, inputs = _split(inputs, 6)
-                bs.append(biases)
-            xs = inputs
-            hy, ys = functions.n_step_gru(
-                self.n_layers, self.dropout, hx, ws, bs, xs)
-            return (hy, ) + ys
-
-        gradient_check.check_backward(
-            f, args, grads, eps=1e-2, rtol=1e-3, atol=1e-3)
-
-    def test_backward_cpu(self):
-        self.check_backward(self.hx, self.xs, self.ws, self.bs,
-                            self.dhy, self.dys)
-
-    @attr.gpu
-    def test_backward_gpu(self):
-        with chainer.using_config('use_cudnn', 'always'):
-            self.check_backward(
-                _to_gpu(self.hx),
-                _to_gpu(self.xs),
-                _to_gpu(self.ws),
-                _to_gpu(self.bs),
-                _to_gpu(self.dhy),
-                _to_gpu(self.dys))
-
-    def call_forward(self, train):
-        hx = _wrap_variable(_to_gpu(self.hx))
-        xs = _wrap_variable(_to_gpu(self.xs))
-        ws = _wrap_variable(_to_gpu(self.ws))
-        bs = _wrap_variable(_to_gpu(self.bs))
-        with chainer.using_config('enable_backprop', train), \
-                chainer.using_config('train', train):
-            return functions.n_step_gru(
-                self.n_layers, self.dropout, hx, ws, bs, xs)
-
-    def check_call_cudnn_forward_training(self, use_cudnn):
-        with chainer.using_config('use_cudnn', use_cudnn):
-            expect = chainer.should_use_cudnn('>=auto', 5000)
-            with testing.patch('cupy.cudnn.rnn_forward_training') as func:
-                self.call_forward(True)
-            assert func.called == expect
-
-    @attr.cudnn
-    def test_call_cudnn_forward_training(self):
-        self.check_call_cudnn_forward_training('always')
-        self.check_call_cudnn_forward_training('never')
-        self.check_call_cudnn_forward_training('auto')
-
-    def check_call_cudnn_forward_inference(self, use_cudnn):
-        with chainer.using_config('use_cudnn', use_cudnn):
-            expect = chainer.should_use_cudnn('>=auto', 5000)
-            with testing.patch('cupy.cudnn.rnn_forward_inference') as func:
-                self.call_forward(False)
-            assert func.called == expect
-
-    @attr.cudnn
-    def test_call_cudnn_forward_inference(self):
-        self.check_call_cudnn_forward_inference('always')
-        self.check_call_cudnn_forward_inference('never')
-        self.check_call_cudnn_forward_inference('auto')
-
-    def check_call_cudnn_backward(self, use_cudnn):
-        with chainer.using_config('use_cudnn', use_cudnn):
-            expect = chainer.should_use_cudnn('>=auto', 5000)
-            hy, ys = self.call_forward(True)
-            hy.grad = _to_gpu(self.dhy)
-            with testing.patch('cupy.cudnn.rnn_backward_weights') as func:
-                hy.backward()
-            assert func.called == expect
-
-    @attr.cudnn
-    def test_call_cudnn_backward(self):
-        self.check_call_cudnn_backward('always')
-        self.check_call_cudnn_backward('never')
-        self.check_call_cudnn_backward('auto')
+                weights.append(_gen_uniform((out_size, w_in), W_dtype))
+                biases.append(_gen_uniform((out_size,), x_dtype))
+            ws.append(weights)
+            bs.append(biases)
+        self.ws, self.bs = ws, bs
 
 
-class TestNStepBiGRU(unittest.TestCase):
-
-    batches = [3, 2, 1]
-    length = len(batches)
-    in_size = 3
-    out_size = 2
-    n_layers = 2
-    dropout = 0.0
+@testing.parameterize(*testing.product({
+    'x_dtype': [numpy.float32],
+    'W_dtype': [numpy.float32],
+}))
+@testing.inject_backend_tests(
+    ['test_forward', 'test_backward'],
+    # CPU tests
+    [{}]
+    # GPU tests
+    + testing.product({
+        'use_cuda': [True],
+        'use_cudnn': ['never', 'always'],
+        'cuda_device': [0, 1],
+    })
+)
+class TestNStepBiGRU(testing.FunctionTestCase, BaseTestNStepGRU):
 
     def setUp(self):
-        self.xs = [numpy.random.uniform(-1, 1, (b, self.in_size)).astype('f')
-                   for b in self.batches]
-        h_shape = (self.n_layers * 2, self.batches[0], self.out_size)
-        self.hx = numpy.random.uniform(-1, 1, h_shape).astype(numpy.float32)
+        self.length = len(self.batches)
+        self.h_shape = (self.n_layers * 2, self.batches[0], self.out_size)
+        self._prepare_weights()
+        self.check_forward_options.update({'atol': 1e-4, 'rtol': 1e-4})
+        self.check_backward_options.update({'atol': 1e-3, 'rtol': 1e-3})
 
-        self.ws = []
-        self.bs = []
+    def _prepare_weights(self):
+        out_size, W_dtype, x_dtype = self.out_size, self.W_dtype, self.x_dtype
+        ws, bs = [], []
         for i in range(self.n_layers):
-            for di in [0, 1]:
-                weights = []
-                biases = []
-                for j in range(6):
-                    if i == 0 and j < 3:
-                        w_in = self.in_size
-                    elif i > 0 and j < 3:
-                        w_in = self.out_size * 2
-                    else:
-                        w_in = self.out_size
-
-                    weights.append(numpy.random.uniform(
-                        -1, 1, (self.out_size, w_in)).astype('f'))
-                    biases.append(numpy.random.uniform(
-                        -1, 1, (self.out_size,)).astype('f'))
-                self.ws.append(weights)
-                self.bs.append(biases)
-
-        self.dys = [numpy.random.uniform(-1, 1,
-                                         (b, self.out_size * 2)).astype('f')
-                    for b in self.batches]
-        self.dhy = numpy.random.uniform(-1, 1, h_shape).astype(numpy.float32)
-
-    def check_forward(self, h_data, xs_data, ws_data, bs_data):
-        h = chainer.Variable(h_data)
-        xs = [chainer.Variable(x) for x in xs_data]
-        ws = [[chainer.Variable(w) for w in ws]
-              for ws in ws_data]
-        bs = [[chainer.Variable(b) for b in bs]
-              for bs in bs_data]
-        hy, ys = functions.n_step_bigru(
-            self.n_layers, self.dropout, h, ws, bs, xs)
-
-        xs_next = self.xs
-        e_hy = self.hx.copy()
-        for layer in range(self.n_layers):
-            # forward
-            di = 0
-            xf = []
-            layer_idx = layer * 2 + di
-            w = self.ws[layer_idx]
-            b = self.bs[layer_idx]
-            for ind in range(self.length):
-                x = xs_next[ind]
-                batch = x.shape[0]
-                h_prev = e_hy[layer_idx, :batch]
-                # GRU
-                z = sigmoid(x.dot(w[1].T) + h_prev.dot(w[4].T) + b[1] + b[4])
-                r = sigmoid(x.dot(w[0].T) + h_prev.dot(w[3].T) + b[0] + b[3])
-                h_bar = numpy.tanh(x.dot(w[2].T) +
-                                   r *
-                                   ((h_prev).dot(w[5].T) + b[5]) + b[2])
-                e_h = (1 - z) * h_bar + z * h_prev
-                e_hy[layer_idx, :batch] = e_h
-                xf.append(e_h)
-
-            # backward
-            di = 1
-            xb = []
-            layer_idx = layer * 2 + di
-            w = self.ws[layer_idx]
-            b = self.bs[layer_idx]
-            for ind in reversed(range(self.length)):
-                x = xs_next[ind]
-                batch = x.shape[0]
-                h_prev = e_hy[layer_idx, :batch]
-                # GRU
-                z = sigmoid(x.dot(w[1].T) + h_prev.dot(w[4].T) + b[1] + b[4])
-                r = sigmoid(x.dot(w[0].T) + h_prev.dot(w[3].T) + b[0] + b[3])
-                h_bar = numpy.tanh(x.dot(w[2].T) +
-                                   r *
-                                   ((h_prev).dot(w[5].T) + b[5]) + b[2])
-                e_h = (1 - z) * h_bar + z * h_prev
-                e_hy[layer_idx, :batch] = e_h
-                xb.append(e_h)
-            xb.reverse()
-            xs_next = [numpy.concatenate([hfi, hbi], axis=1) for (hfi, hbi) in
-                       zip(xf, xb)]
-
-        for k, (ysi, xsi) in enumerate(zip(ys, xs_next)):
-            testing.assert_allclose(ysi.data, xsi, rtol=1e-4, atol=1e-4)
-
-        testing.assert_allclose(hy.data, e_hy, rtol=1e-4, atol=1e-4)
-
-    def test_forward_cpu(self):
-        self.check_forward(self.hx, self.xs, self.ws, self.bs)
-
-    def check_forward_gpu(self, use_cudnn):
-        with chainer.using_config('use_cudnn', use_cudnn):
-            self.check_forward(
-                _to_gpu(self.hx),
-                _to_gpu(self.xs),
-                _to_gpu(self.ws),
-                _to_gpu(self.bs))
-
-    @attr.gpu
-    def test_forward_gpu_cudnn_always(self):
-        self.check_forward_gpu('always')
-
-    @attr.gpu
-    def test_forward_gpu_cudnn_auto(self):
-        self.check_forward_gpu('auto')
-
-    @attr.gpu
-    def test_forward_gpu_cudnn_never(self):
-        self.check_forward_gpu('never')
-
-    def check_backward(self, h_data, xs_data, ws_data, bs_data,
-                       dhy_data, dys_data):
-        args = tuple([h_data, ] + sum(ws_data, []) + sum(bs_data, []) +
-                     xs_data)
-        grads = tuple([dhy_data, ] + dys_data)
-
-        def f(*inputs):
-            (hx, ), inputs = _split(inputs, 1)
-            ws = []
-            for i in range(self.n_layers * 2):
-                weights, inputs = _split(inputs, 6)
-                ws.append(weights)
-            bs = []
-            for i in range(self.n_layers * 2):
-                biases, inputs = _split(inputs, 6)
-                bs.append(biases)
-            xs = inputs
-            hy, ys = functions.n_step_bigru(
-                self.n_layers, self.dropout, hx, ws, bs, xs)
-            return (hy, ) + ys
-
-        gradient_check.check_backward(
-            f, args, grads, eps=1e-2, rtol=1e-3, atol=1e-3)
-
-    def test_backward_cpu(self):
-        self.check_backward(self.hx, self.xs, self.ws, self.bs,
-                            self.dhy, self.dys)
-
-    @attr.gpu
-    def test_backward_gpu(self):
-        with chainer.using_config('use_cudnn', 'always'):
-            self.check_backward(
-                _to_gpu(self.hx),
-                _to_gpu(self.xs),
-                _to_gpu(self.ws),
-                _to_gpu(self.bs),
-                _to_gpu(self.dhy),
-                _to_gpu(self.dys))
-
-    def call_forward(self, train):
-        hx = _wrap_variable(_to_gpu(self.hx))
-        xs = _wrap_variable(_to_gpu(self.xs))
-        ws = _wrap_variable(_to_gpu(self.ws))
-        bs = _wrap_variable(_to_gpu(self.bs))
-        with chainer.using_config('enable_backprop', train), \
-                chainer.using_config('train', train):
-            return functions.n_step_bigru(
-                self.n_layers, self.dropout, hx, ws, bs, xs)
-
-    def check_call_cudnn_forward_training(self, use_cudnn):
-        with chainer.using_config('use_cudnn', use_cudnn):
-            expect = chainer.should_use_cudnn('>=auto', 5000)
-            with testing.patch('cupy.cudnn.rnn_forward_training') as func:
-                self.call_forward(True)
-            assert func.called == expect
-
-    @attr.cudnn
-    def test_call_cudnn_forward_training(self):
-        self.check_call_cudnn_forward_training('always')
-        self.check_call_cudnn_forward_training('never')
-        self.check_call_cudnn_forward_training('auto')
-
-    def check_call_cudnn_forward_inference(self, use_cudnn):
-        with chainer.using_config('use_cudnn', use_cudnn):
-            expect = chainer.should_use_cudnn('>=auto', 5000)
-            with testing.patch('cupy.cudnn.rnn_forward_inference') as func:
-                self.call_forward(False)
-            assert func.called == expect
-
-    @attr.cudnn
-    def test_call_cudnn_forward_inference(self):
-        self.check_call_cudnn_forward_inference('always')
-        self.check_call_cudnn_forward_inference('never')
-        self.check_call_cudnn_forward_inference('auto')
-
-    def check_call_cudnn_backward(self, use_cudnn):
-        with chainer.using_config('use_cudnn', use_cudnn):
-            expect = chainer.should_use_cudnn('>=auto', 5000)
-            hy, ys = self.call_forward(True)
-            hy.grad = _to_gpu(self.dhy)
-            with testing.patch('cupy.cudnn.rnn_backward_weights') as func:
-                hy.backward()
-            assert func.called == expect
-
-    @attr.cudnn
-    def test_call_cudnn_backward(self):
-        self.check_call_cudnn_backward('always')
-        self.check_call_cudnn_backward('never')
-        self.check_call_cudnn_backward('auto')
+            weights, biases = [], []
+            for j in range(6):
+                if i == 0 and j < 3:
+                    w_in = self.in_size
+                elif i > 0 and j < 3:
+                    w_in = self.out_size * 2
+                else:
+                    w_in = self.out_size
+                weights.append(_gen_uniform((out_size, w_in), W_dtype))
+                biases.append(_gen_uniform((out_size,), x_dtype))
+            ws.append(weights)
+            bs.append(biases)
+        self.ws, self.bs = ws, bs
 
 
 testing.run_module(__name__, __file__)
