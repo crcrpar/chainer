@@ -46,7 +46,7 @@ class TestNStepLSTM(unittest.TestCase):
 
         for layer in self.rnn:
             for p in layer.params():
-                p.data[...] = numpy.random.uniform(-1, 1, p.data.shape)
+                p.array[...] = numpy.random.uniform(-1, 1, p.array.shape)
         self.rnn.cleargrads()
 
     def check_forward(self, h_data, c_data, xs_data):
@@ -58,12 +58,12 @@ class TestNStepLSTM(unittest.TestCase):
         xs = [chainer.Variable(x) for x in xs_data]
         hy, cy, ys = self.rnn(h, c, xs)
 
-        self.assertEqual(hy.data.shape, h_data.shape)
-        self.assertEqual(cy.data.shape, c_data.shape)
+        self.assertEqual(hy.shape, h_data.shape)
+        self.assertEqual(cy.shape, c_data.shape)
         self.assertEqual(len(xs), len(ys))
         for x, y in zip(xs, ys):
-            self.assertEqual(len(x.data), len(y.data))
-            self.assertEqual(y.data.shape[1], self.out_size)
+            self.assertEqual(len(x), len(y))
+            self.assertEqual(y.shape[1], self.out_size)
 
         self.rnn.to_cpu()
 
@@ -74,15 +74,15 @@ class TestNStepLSTM(unittest.TestCase):
                 c_prev = self.c[layer, batch]
                 hs = []
                 for x in seq:
-                    i = sigmoid(x.dot(p.w0.data.T) + h_prev.dot(p.w4.data.T) +
-                                p.b0.data + p.b4.data)
-                    f = sigmoid(x.dot(p.w1.data.T) + h_prev.dot(p.w5.data.T) +
-                                p.b1.data + p.b5.data)
+                    i = sigmoid(x.dot(p.w0.array.T) + h_prev.dot(p.w4.array.T) +
+                                p.b0.array + p.b4.array)
+                    f = sigmoid(x.dot(p.w1.array.T) + h_prev.dot(p.w5.array.T) +
+                                p.b1.array + p.b5.array)
                     c_bar = numpy.tanh(
-                        x.dot(p.w2.data.T) + h_prev.dot(p.w6.data.T) +
-                        p.b2.data + p.b6.data)
-                    o = sigmoid(x.dot(p.w3.data.T) + h_prev.dot(p.w7.data.T) +
-                                p.b3.data + p.b7.data)
+                        x.dot(p.w2.array.T) + h_prev.dot(p.w6.array.T) +
+                        p.b2.array + p.b6.array)
+                    o = sigmoid(x.dot(p.w3.array.T) + h_prev.dot(p.w7.array.T) +
+                                p.b3.array + p.b7.array)
                     e_c = (f * c_prev + i * c_bar)
                     e_h = o * numpy.tanh(e_c)
 
@@ -91,10 +91,10 @@ class TestNStepLSTM(unittest.TestCase):
                     hs.append(e_h)
 
                 seq = hs
-                testing.assert_allclose(hy.data[layer, batch], h_prev)
-                testing.assert_allclose(cy.data[layer, batch], c_prev)
+                testing.assert_allclose(hy.array[layer, batch], h_prev)
+                testing.assert_allclose(cy.array[layer, batch], c_prev)
 
-            for y, ey in zip(ys[batch].data, seq):
+            for y, ey in zip(ys[batch].array, seq):
                 testing.assert_allclose(y, ey)
 
     def test_forward_cpu_train(self):
@@ -216,7 +216,7 @@ class TestNStepBiLSTM(unittest.TestCase):
 
         for layer in self.rnn:
             for p in layer.params():
-                p.data[...] = numpy.random.uniform(-1, 1, p.data.shape)
+                p.array[...] = numpy.random.uniform(-1, 1, p.shape)
         self.rnn.cleargrads()
 
     def check_forward(self, h_data, c_data, xs_data):
@@ -228,12 +228,12 @@ class TestNStepBiLSTM(unittest.TestCase):
         xs = [chainer.Variable(x) for x in xs_data]
         hy, cy, ys = self.rnn(h, c, xs)
 
-        self.assertEqual(hy.data.shape, h_data.shape)
-        self.assertEqual(cy.data.shape, c_data.shape)
+        self.assertEqual(hy.shape, h_data.shape)
+        self.assertEqual(cy.shape, c_data.shape)
         self.assertEqual(len(xs), len(ys))
         for x, y in zip(xs, ys):
-            self.assertEqual(len(x.data), len(y.data))
-            self.assertEqual(y.data.shape[1], self.out_size * 2)
+            self.assertEqual(len(x), len(y))
+            self.assertEqual(y.shape[1], self.out_size * 2)
 
         self.rnn.to_cpu()
 
@@ -247,17 +247,17 @@ class TestNStepBiLSTM(unittest.TestCase):
                 c_prev = self.c[layer_idx, batch]
                 hs_f = []
                 for x in seq:
-                    i = sigmoid(x.dot(p.w0.data.T) +
-                                h_prev.dot(p.w4.data.T) +
-                                p.b0.data + p.b4.data)
-                    f = sigmoid(x.dot(p.w1.data.T) +
-                                h_prev.dot(p.w5.data.T) +
-                                p.b1.data + p.b5.data)
-                    c_bar = numpy.tanh(x.dot(p.w2.data.T) +
-                                       h_prev.dot(p.w6.data.T) +
-                                       p.b2.data + p.b6.data)
-                    o = sigmoid(x.dot(p.w3.data.T) + h_prev.dot(p.w7.data.T) +
-                                p.b3.data + p.b7.data)
+                    i = sigmoid(x.dot(p.w0.array.T) +
+                                h_prev.dot(p.w4.array.T) +
+                                p.b0.data + p.b4.array)
+                    f = sigmoid(x.dot(p.w1.array.T) +
+                                h_prev.dot(p.w5.array.T) +
+                                p.b1.array + p.b5.array)
+                    c_bar = numpy.tanh(x.dot(p.w2.array.T) +
+                                       h_prev.dot(p.w6.array.T) +
+                                       p.b2.array + p.b6.array)
+                    o = sigmoid(x.dot(p.w3.array.T) + h_prev.dot(p.w7.array.T) +
+                                p.b3.array + p.b7.array)
                     e_c = (f * c_prev + i * c_bar)
                     e_h = o * numpy.tanh(e_c)
 
@@ -265,8 +265,8 @@ class TestNStepBiLSTM(unittest.TestCase):
                     c_prev = e_c
                     hs_f.append(e_h)
 
-                testing.assert_allclose(hy.data[layer_idx, batch], h_prev)
-                testing.assert_allclose(cy.data[layer_idx, batch], c_prev)
+                testing.assert_allclose(hy.array[layer_idx, batch], h_prev)
+                testing.assert_allclose(cy.array[layer_idx, batch], c_prev)
 
                 # backward
                 di = 1
@@ -276,17 +276,17 @@ class TestNStepBiLSTM(unittest.TestCase):
                 c_prev = self.c[layer_idx, batch]
                 hs_b = []
                 for x in reversed(seq):
-                    i = sigmoid(x.dot(p.w0.data.T) +
-                                h_prev.dot(p.w4.data.T) +
-                                p.b0.data + p.b4.data)
-                    f = sigmoid(x.dot(p.w1.data.T) +
-                                h_prev.dot(p.w5.data.T) +
-                                p.b1.data + p.b5.data)
-                    c_bar = numpy.tanh(x.dot(p.w2.data.T) +
-                                       h_prev.dot(p.w6.data.T) +
-                                       p.b2.data + p.b6.data)
-                    o = sigmoid(x.dot(p.w3.data.T) + h_prev.dot(p.w7.data.T) +
-                                p.b3.data + p.b7.data)
+                    i = sigmoid(x.dot(p.w0.array.T) +
+                                h_prev.dot(p.w4.array.T) +
+                                p.b0.array + p.b4.array)
+                    f = sigmoid(x.dot(p.w1.array.T) +
+                                h_prev.dot(p.w5.array.T) +
+                                p.b1.array + p.b5.array)
+                    c_bar = numpy.tanh(x.dot(p.w2.array.T) +
+                                       h_prev.dot(p.w6.array.T) +
+                                       p.b2.array + p.b6.array)
+                    o = sigmoid(x.dot(p.w3.array.T) + h_prev.dot(p.w7.array.T) +
+                                p.b3.array + p.b7.array)
                     e_c = (f * c_prev + i * c_bar)
                     e_h = o * numpy.tanh(e_c)
 
@@ -294,8 +294,8 @@ class TestNStepBiLSTM(unittest.TestCase):
                     c_prev = e_c
                     hs_b.append(e_h)
 
-                testing.assert_allclose(hy.data[layer_idx, batch], h_prev)
-                testing.assert_allclose(cy.data[layer_idx, batch], c_prev)
+                testing.assert_allclose(hy.array[layer_idx, batch], h_prev)
+                testing.assert_allclose(cy.array[layer_idx, batch], c_prev)
 
                 hs_b.reverse()
                 seq = [numpy.concatenate([hfi, hbi], axis=0) for (hfi, hbi)
@@ -377,6 +377,64 @@ class TestNStepBiLSTM(unittest.TestCase):
 
     def test_n_cells(self):
         self.assertEqual(self.rnn.n_cells, 2)
+
+
+@testing.parameterize(*testing.product({
+    'rnn_module': [links.NStepLSTM, links.NStepBiLSTM],
+    'hidden_none': [True, False],
+    'train': [True, False],
+}))
+class TestDropoutEnabledCuDNN(unittest.TestCase):
+
+    lengths = [3, 1, 2]
+    n_layer = 2
+    in_size = 3
+    out_size = 2
+    dropout = 0.5
+
+    def setUp(self):
+        if self.rnn_module == links.NStepLSTM:
+            shape = (self.n_layer, len(self.lengths), self.out_size)
+        elif self.rnn_module == links.NStepBiLSTM:
+            shape = (self.n_layer * 2, len(self.lengths), self.out_size)
+        else:
+            raise ValueError
+        if self.hidden_none:
+            self.h = self.c = numpy.zeros(shape, 'f')
+        else:
+            self.h = numpy.random.uniform(-1, 1, shape).astype('f')
+            self.c = numpy.random.uniform(-1, 1, shape).astype('f')
+        self.xs = [
+            numpy.random.uniform(-1, 1, (l, self.in_size)).astype('f')
+            for l in self.lengths]
+
+        self.gh = numpy.random.uniform(-1, 1, shape).astype('f')
+        self.gc = numpy.random.uniform(-1, 1, shape).astype('f')
+        self.gys = [
+            numpy.random.uniform(-1, 1, (l, self.out_size)).astype('f')
+            for l in self.lengths]
+        self.rnn = self.rnn_module(
+            self.n_layer, self.in_size, self.out_size, self.dropout)
+
+        for layer in self.rnn:
+            for p in layer.params():
+                p.array[...] = numpy.random.uniform(-1, 1, p.shape)
+        self.rnn.cleargrads()
+
+    @attr.multi_gpu(2)
+    def test_forward_nonzero_gpu(self):
+        self.rnn.to_gpu(1)
+        h = chainer.Variable(cuda.to_gpu(self.h, 1))
+        c = chainer.Variable(cuda.to_gpu(self.c, 1))
+        xs = [chainer.Variable(cuda.to_gpu(x, 1)) for x in self.xs]
+        msg = None
+        with chainer.using_config('use_cudnn', 'always'), \
+                chainer.using_config('train', self.train):
+            try:
+                self.rnn(h, c, xs)
+            except Exception as e:
+                msg = e.message
+        assert msg is None
 
 
 testing.run_module(__name__, __file__)
