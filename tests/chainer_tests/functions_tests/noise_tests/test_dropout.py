@@ -68,17 +68,17 @@ class TestDropout(unittest.TestCase):
         if backend_config.use_cudnn == 'always':
             if self.ratio == 0.0:
                 y_expected, = inputs
-                testing.assert_allclose(y_expected, y.data)
+                testing.assert_allclose(y_expected, y.array)
             else:
-                self.assertTrue(cuda.cupy.all(inputs[0] != y.data))
+                assert cuda.cupy.all(inputs[0] != y.array)
         else:
             # In the calculation of expected results,
             # the mask used in test forward computation is reused.
             mask = y.creator.mask
             y_expected, = self.forward_cpu(inputs, self.ratio, mask)
 
-            assert y.data.dtype == self.dtype
-            testing.assert_allclose(y_expected, y.data)
+            assert y.dtype == self.dtype
+            testing.assert_allclose(y_expected, y.array)
 
     def test_forward(self, backend_config):
         self.check_forward(self.inputs, backend_config)
@@ -134,7 +134,7 @@ class TestDropout(unittest.TestCase):
             dropout = functions.noise.dropout.Dropout(0.5)
             y1, = dropout.apply(inputs)
             y2, = dropout.apply(inputs)
-        testing.assert_allclose(y1.data, y2.data)
+        testing.assert_allclose(y1.array, y2.array)
 
     def test_immutable(self, backend_config):
         self.check_immutable(self.inputs, backend_config)
@@ -183,7 +183,17 @@ class TestDropoutMask(unittest.TestCase):
     def test_gpu(self):
         self.x = cuda.to_gpu(self.x)
         self.mask = cuda.to_gpu(self.mask)
-        self._check()
+        with chainer.using_config('use_cudnn', 'never'):
+            self._check()
+
+    @attr.cudnn
+    def test_cudnn(self):
+        if not self.specify_mask:
+            raise unittest.SkipTest()
+        self.x = cuda.to_gpu(self.x)
+        self.mask = cuda.to_gpu(self.mask)
+        with chainer.using_config('use_cudnn', 'auto'):
+            self._check()
 
 
 testing.run_module(__name__, __file__)

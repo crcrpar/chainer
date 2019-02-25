@@ -43,7 +43,7 @@ class Dropout(function_node.FunctionNode):
         return y,
 
     def forward_gpu(self, x):
-        if (chainer.should_use_cudnn('==always', 5000)
+        if (chainer.should_use_cudnn('>=auto', 5000)
                 and x[0].flags.c_contiguous
                 and self.mask is None):
             self._use_cudnn = True
