@@ -8,6 +8,7 @@ from chainer import backend
 from chainer.backends import cuda
 from chainer import configuration
 from chainer import function
+from chainer import function_node
 from chainer.functions.activation import relu
 from chainer.functions.activation import tanh
 from chainer.functions.array import concat
@@ -59,7 +60,7 @@ if cuda.cudnn_enabled and _cudnn_version >= 5000:
     }
 
 
-class CudnnRNNWeightConcat(function.Function):
+class CudnnRNNWeightConcat(function_node.FunctionNode):
 
     """Concatenates weight matrices for cuDNN's RNN.
 
@@ -120,13 +121,16 @@ class CudnnRNNWeightConcat(function.Function):
                         b_type.shape[0] == out_size,
                     )
 
-    def forward(self, inputs):
+    def forward_cpu(self, inputs):
+        raise NotImplementedError
+
+    def forward_gpu(self, inputs):
         handle = cudnn.get_handle()
         ws_size = self.n_layers * self.rnn_direction * self.n_W
+        self.retain_inputs(tuple(range(len(inputs))))
         ws = inputs[0:ws_size]
         bs = inputs[ws_size:]
-        out_size = ws[0].shape[0]
-        in_size = ws[0].shape[1]
+        out_size, in_size = ws[0].shape[:2]
 
         # TODO(unno): Make a wrapper method to avoid access _desc directly
         rnn_desc = cudnn.create_rnn_descriptor(
@@ -163,7 +167,11 @@ class CudnnRNNWeightConcat(function.Function):
         self.x_desc = x_desc
         return w,
 
-    def backward(self, inputs, grads):
+    def backward_cpu(self, indexes, grads):
+        raise NotImplementedError
+
+    def backward_gpu(self, indexes, grads):
+        inputs = self.get_retained_inputs()
         handle = cudnn.get_handle()
         ws_size = self.n_layers * self.rnn_direction * self.n_W
         ws = inputs[0:ws_size]
@@ -195,14 +203,15 @@ class CudnnRNNWeightConcat(function.Function):
 def cudnn_rnn_weight_concat(
         n_layers, states, use_bi_direction, rnn_mode, ws, bs):
     rnn_dir = 'bi' if use_bi_direction else 'uni'
-    inputs = itertools.chain(
+    inputs = tuple(itertools.chain(
         itertools.chain.from_iterable(ws),
         itertools.chain.from_iterable(bs),
-    )
-    return CudnnRNNWeightConcat(n_layers, states, rnn_dir, rnn_mode)(*inputs)
+    ))
+    f = CudnnRNNWeightConcat(n_layers, states, rnn_dir, rnn_mode)
+    return f.apply(inputs)[0]
 
 
-class BaseNStepRNN(function.Function):
+class BaseNStepRNN(function_node.FunctionNode):
 
     def __init__(self, n_layers, states, lengths, rnn_dir, rnn_mode, **kwargs):
         if kwargs:
@@ -236,15 +245,12 @@ class BaseNStepRNN(function.Function):
             type_check.expect(
                 h_type.dtype == numpy.float32,
                 c_type.dtype == numpy.float32,
-
                 h_type.ndim == 3,
                 h_type.shape[0] == h_size,
                 c_type.ndim == 3,
                 c_type.shape[0] == h_size,
-
                 # mini-batch size
                 h_type.shape[1] == c_type.shape[1],
-
                 # hidden size
                 h_type.shape[2] == c_type.shape[2],
             )
@@ -255,7 +261,6 @@ class BaseNStepRNN(function.Function):
             h_size = self.n_layers * self.rnn_direction
             type_check.expect(
                 h_type.dtype == numpy.float32,
-
                 h_type.ndim == 3,
                 h_type.shape[0] == h_size,
             )
@@ -266,7 +271,22 @@ class BaseNStepRNN(function.Function):
             x_type.shape[0] == self.sections[-1],
         )
 
-    def forward(self, inputs):
+    def forward_cpu(self, inputs):
+        return self._forward_generic(inputs)
+
+    def forward_gpu(self, inputs):
+        if chainer.should_use_cudnn('>=auto', 5000):
+            return self._forward_cudnn(inputs)
+        return self._forward_generic(inputs)
+
+    def _forward_generic(self, inputs):
+        # TODO(crcrpar): Complete this by port the current CPU implementation
+        # which is heavily based on existing `chainer.Function`s.
+        raise NotImplementedError
+
+    def _forward_cudnn(self, inputs):
+        assert chainer.should_use_cudnn('>=auto', 5000)
+        self.retain_inputs(tuple(range(len(inputs))))
         if self.use_cell:
             # LSTM
             hx, cx, w, xs = inputs
@@ -294,10 +314,22 @@ class BaseNStepRNN(function.Function):
             self.retain_outputs((1,))
             return hy, ys
 
-    def backward(self, inputs, grads):
+    def backward_cpu(self, indexes, grads):
+        # TODO(crcrpar): Write down backward path.
+        raise NotImplementedError
+
+    def backward_gpu(self, indexes, grads):
         if not configuration.config.train:
             raise RuntimeError('cuDNN does not support backward computation '
                                'of RNN in testing mode')
+
+        if chainer.should_use_cudnn('>=auto', 5000):
+            return self._backward_cudnn(indexes, grads)
+
+        raise NotImplementedError
+
+    def _backward_cudnn(self, indexes, grads):
+        inputs = self.get_retained_inputs()
 
         if self.use_cell:
             # LSTM
@@ -305,14 +337,13 @@ class BaseNStepRNN(function.Function):
             dhy, dcy, dys = grads
             if dcy is None:
                 dcy = cuda.cupy.zeros_like(cx)
-
         else:
             # GRU, RNN
             hx, w, xs = inputs
             dhy, dys = grads
             dcy = cx = None
 
-        ys = self.output_data[-1]
+        ys, = self.get_retained_outputs()
 
         if dhy is None:
             dhy = cuda.cupy.zeros_like(hx)
@@ -666,7 +697,7 @@ use_bi_direction)
             elif activation == 'relu':
                 rnn = NStepRNNReLU
 
-        hy, ys = rnn(n_layers, states, lengths)(hx, w, xs)
+        hy, ys = rnn(n_layers, states, lengths).apply((hx, w, xs))
         sections = numpy.cumsum(lengths[:-1])
         ys = chainer.functions.split_axis(ys, sections, 0)
         return hy, ys
