@@ -8,7 +8,6 @@ from chainer import functions
 from chainer import gradient_check
 from chainer import testing
 from chainer.testing import attr
-from chainer.testing import condition
 
 
 def _split(inputs, pos):
@@ -21,6 +20,15 @@ def _relu(x):
         if x[i] < 0:
             expected[i] = 0
     return expected
+
+
+def _send_array(x, backend_config):
+    if x is None:
+        return None
+    elif isinstance(x, list):
+        return [backend_config.get_array(xi) for xi in x]
+    else:
+        return backend_config.get_array(x)
 
 
 def _to_gpu(x):
@@ -49,6 +57,16 @@ def _wrap_variable(x):
 @testing.parameterize(*testing.product({
     'activation': ['tanh', 'relu']
 }))
+@testing.inject_backend_tests(
+    ['test_forward', 'test_backward', 'test_backward_partially_none'],
+    # CPU tests
+    [{}]
+    # GPU tests
+    + testing.product({
+        'use_cuda': [True],
+        'use_cudnn': ['never', 'always']
+    })
+)
 class TestNStepRNN(unittest.TestCase):
 
     batches = [3, 2, 1]
@@ -77,15 +95,15 @@ class TestNStepRNN(unittest.TestCase):
         self.dys = _shaped_random([(b, self.out_size) for b in self.batches])
         self.dhy = _shaped_random(h_shape)
 
-    def check_forward(
-            self, h_data, xs_data, ws_data, bs_data):
-        h = _wrap_variable(h_data)
-        xs = _wrap_variable(xs_data)
-        ws = _wrap_variable(ws_data)
-        bs = _wrap_variable(bs_data)
-        hy, ys = functions.n_step_rnn(
-            self.n_layers, self.dropout, h, ws, bs, xs,
-            activation=self.activation)
+    def test_forward(self, backend_config):
+        hx = _wrap_variable(_send_array(self.hx, backend_config))
+        xs = _wrap_variable(_send_array(self.xs, backend_config))
+        ws = _wrap_variable(_send_array(self.ws, backend_config))
+        bs = _wrap_variable(_send_array(self.bs, backend_config))
+        with backend_config:
+            hy, ys = functions.n_step_rnn(
+                self.n_layers, self.dropout, hx, ws, bs, xs,
+                activation=self.activation)
 
         e_hy = self.hx.copy()
         for ind in range(self.length):
@@ -103,41 +121,19 @@ class TestNStepRNN(unittest.TestCase):
                                 h_prev.dot(w[1].T) + b[0] + b[1])
 
                 e_hy[layer, :batch] = e_h
-
                 x = e_h
 
             testing.assert_allclose(
-                ys[ind].data, x, rtol=1e-4, atol=1e-4)
+                ys[ind].array, x, rtol=1e-4, atol=1e-4)
 
-        testing.assert_allclose(hy.data, e_hy, rtol=1e-4, atol=1e-4)
+        testing.assert_allclose(hy.array, e_hy, rtol=1e-4, atol=1e-4)
 
-    def test_forward_cpu(self):
-        self.check_forward(self.hx, self.xs, self.ws, self.bs)
-
-    def check_forward_gpu(self, use_cudnn):
-        with chainer.using_config('use_cudnn', use_cudnn):
-            self.check_forward(
-                _to_gpu(self.hx),
-                _to_gpu(self.xs),
-                _to_gpu(self.ws),
-                _to_gpu(self.bs))
-
-    @attr.gpu
-    def test_forward_gpu_cudnn_always(self):
-        self.check_forward_gpu('always')
-
-    @attr.gpu
-    def test_forward_gpu_cudnn_never(self):
-        self.check_forward_gpu('never')
-
-    def check_backward(self, h_data, xs_data, ws_data, bs_data,
-                       dhy_data, dys_data):
-        args = tuple([h_data, ] + sum(ws_data, []) + sum(bs_data, []) +
-                     xs_data)
-        grads = tuple([dhy_data, ] + dys_data)
+    def check_backward(self, hx, xs, ws, bs, dhy, dys, backend_config):
+        args = tuple([hx] + sum(ws, []) + sum(bs, []) + xs)
+        grads = tuple([dhy] + dys)
 
         def f(*inputs):
-            (hx, ), inputs = _split(inputs, 1)
+            (hx,), inputs = _split(inputs, 1)
             ws = []
             for i in range(self.n_layers):
                 weights, inputs = _split(inputs, 2)
@@ -147,49 +143,36 @@ class TestNStepRNN(unittest.TestCase):
                 biases, inputs = _split(inputs, 2)
                 bs.append(biases)
             xs = inputs
-            hy, ys = functions.n_step_rnn(
-                self.n_layers, self.dropout, hx, ws, bs, xs,
-                activation=self.activation)
-            return (hy, ) + ys
+            with backend_config:
+                hy, ys = functions.n_step_rnn(
+                    self.n_layers, self.dropout, hx, ws, bs, xs,
+                    activation=self.activation)
+            return (hy,) + ys
 
         gradient_check.check_backward(
             f, args, grads, rtol=1e-2, atol=5e-2)
 
-    @condition.retry(3)
-    def test_backward_cpu(self):
-        self.check_backward(self.hx, self.xs, self.ws, self.bs,
-                            self.dhy, self.dys)
+    def test_backward(self, backend_config):
+        hx = _send_array(self.hx, backend_config)
+        xs = _send_array(self.xs, backend_config)
+        ws = _send_array(self.ws, backend_config)
+        bs = _send_array(self.bs, backend_config)
+        dhy = _send_array(self.dhy, backend_config)
+        dys = _send_array(self.dys, backend_config)
 
-    @condition.retry(3)
-    def test_backward_partially_none_cpu(self):
-        self.dys[1] = None
-        self.check_backward(self.hx, self.xs, self.ws, self.bs,
-                            None, self.dys)
+        self.check_backward(hx, xs, ws, bs, dhy, dys, backend_config)
 
-    @attr.gpu
-    @condition.retry(3)
-    def test_backward_gpu(self):
-        with chainer.using_config('use_cudnn', 'always'):
-            self.check_backward(
-                _to_gpu(self.hx),
-                _to_gpu(self.xs),
-                _to_gpu(self.ws),
-                _to_gpu(self.bs),
-                _to_gpu(self.dhy),
-                _to_gpu(self.dys))
+    def test_backward_partially_none(self, backend_config):
+        hx = _send_array(self.hx, backend_config)
+        xs = _send_array(self.xs, backend_config)
+        ws = _send_array(self.ws, backend_config)
+        bs = _send_array(self.bs, backend_config)
+        dhy = _send_array(self.dhy, backend_config)
+        dhy = None
+        dys = _send_array(self.dys, backend_config)
+        dys[1] = None
 
-    @attr.gpu
-    @condition.retry(3)
-    def test_backward_partially_none_gpu(self):
-        self.dys[1] = None
-        with chainer.using_config('use_cudnn', 'always'):
-            self.check_backward(
-                _to_gpu(self.hx),
-                _to_gpu(self.xs),
-                _to_gpu(self.ws),
-                _to_gpu(self.bs),
-                None,
-                _to_gpu(self.dys))
+        self.check_backward(hx, xs, ws, bs, dhy, dys, backend_config)
 
     def call_forward(self, train):
         hx = _wrap_variable(_to_gpu(self.hx))
@@ -308,6 +291,16 @@ class TestNStepRNN(unittest.TestCase):
 @testing.parameterize(*testing.product({
     'activation': ['tanh', 'relu']
 }))
+@testing.inject_backend_tests(
+    ['test_forward', 'test_backward'],
+    # CPU tests
+    [{}]
+    # GPU tests
+    + testing.product({
+        'use_cuda': [True],
+        'use_cudnn': ['never', 'always'],
+    })
+)
 class TestNStepBiRNN(unittest.TestCase):
 
     batches = [3, 2, 1]
@@ -341,14 +334,15 @@ class TestNStepBiRNN(unittest.TestCase):
         self.dhy = _shaped_random(h_shape)
 
     def check_forward(
-            self, h_data, xs_data, ws_data, bs_data):
+            self, h_data, xs_data, ws_data, bs_data, backend_config):
         h = _wrap_variable(h_data)
         xs = _wrap_variable(xs_data)
         ws = _wrap_variable(ws_data)
         bs = _wrap_variable(bs_data)
-        hy, ys = functions.n_step_birnn(
-            self.n_layers, self.dropout, h, ws, bs, xs,
-            activation=self.activation)
+        with backend_config:
+            hy, ys = functions.n_step_birnn(
+                self.n_layers, self.dropout, h, ws, bs, xs,
+                activation=self.activation)
 
         xs_next = self.xs
         e_hy = self.hx.copy()
@@ -397,31 +391,19 @@ class TestNStepBiRNN(unittest.TestCase):
                        zip(xf, xb)]
 
         for k, (ysi, xsi) in enumerate(zip(ys, xs_next)):
-            testing.assert_allclose(ysi.data, xsi, rtol=1e-4, atol=1e-4)
+            testing.assert_allclose(ysi.array, xsi, rtol=1e-4, atol=1e-4)
 
-        testing.assert_allclose(hy.data, e_hy, rtol=1e-4, atol=1e-4)
+        testing.assert_allclose(hy.array, e_hy, rtol=1e-4, atol=1e-4)
 
-    def test_forward_cpu(self):
-        self.check_forward(self.hx, self.xs, self.ws, self.bs)
-
-    def check_forward_gpu(self, use_cudnn):
-        with chainer.using_config('use_cudnn', use_cudnn):
-            self.check_forward(
-                _to_gpu(self.hx),
-                _to_gpu(self.xs),
-                _to_gpu(self.ws),
-                _to_gpu(self.bs))
-
-    @attr.gpu
-    def test_forward_gpu_cudnn_always(self):
-        self.check_forward_gpu('always')
-
-    @attr.gpu
-    def test_forward_gpu_cudnn_never(self):
-        self.check_forward_gpu('never')
+    def test_forward(self, backend_config):
+        hx = _send_array(self.hx, backend_config)
+        xs = _send_array(self.xs, backend_config)
+        ws = _send_array(self.ws, backend_config)
+        bs = _send_array(self.bs, backend_config)
+        self.check_forward(hx, xs, ws, bs, backend_config)
 
     def check_backward(self, h_data, xs_data, ws_data, bs_data,
-                       dhy_data, dys_data):
+                       dhy_data, dys_data, backend_config):
         args = tuple([h_data, ] + sum(ws_data, []) + sum(bs_data, []) +
                      xs_data)
         grads = tuple([dhy_data, ] + dys_data)
@@ -445,41 +427,14 @@ class TestNStepBiRNN(unittest.TestCase):
         gradient_check.check_backward(
             f, args, grads, rtol=1e-2, atol=5e-2)
 
-    @condition.retry(3)
-    def test_backward_cpu(self):
-        self.check_backward(self.hx, self.xs, self.ws, self.bs,
-                            self.dhy, self.dys)
-
-    @condition.retry(3)
-    def test_backward_partially_none_cpu(self):
-        self.dys[1] = None
-        self.check_backward(self.hx, self.xs, self.ws, self.bs,
-                            None, self.dys)
-
-    @attr.gpu
-    @condition.retry(3)
-    def test_backward_gpu(self):
-        with chainer.using_config('use_cudnn', 'always'):
-            self.check_backward(
-                _to_gpu(self.hx),
-                _to_gpu(self.xs),
-                _to_gpu(self.ws),
-                _to_gpu(self.bs),
-                _to_gpu(self.dhy),
-                _to_gpu(self.dys))
-
-    @attr.gpu
-    @condition.retry(3)
-    def test_backward_partially_none_gpu(self):
-        self.dys[1] = None
-        with chainer.using_config('use_cudnn', 'always'):
-            self.check_backward(
-                _to_gpu(self.hx),
-                _to_gpu(self.xs),
-                _to_gpu(self.ws),
-                _to_gpu(self.bs),
-                None,
-                _to_gpu(self.dys))
+    def test_backward(self, backend_config):
+        hx = _send_array(self.hx, backend_config)
+        xs = _send_array(self.xs, backend_config)
+        ws = _send_array(self.ws, backend_config)
+        bs = _send_array(self.bs, backend_config)
+        dhy = _send_array(self.dhy, backend_config)
+        dys = _send_array(self.dys, backend_config)
+        self.check_backward(hx, xs, ws, bs, dhy, dys, backend_config)
 
     def call_forward(self, train):
         hx = _wrap_variable(_to_gpu(self.hx))
