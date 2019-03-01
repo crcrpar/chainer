@@ -247,7 +247,7 @@ def main():
                         help='number of sentence pairs in each mini-batch')
     parser.add_argument('--epoch', '-e', type=int, default=20,
                         help='number of sweeps over the dataset to train')
-    parser.add_argument('--resume', '-r', default='',
+    parser.add_argument('--resume', '-r', type=str,
                         help='resume the training from snapshot')
     parser.add_argument('--save', '-s', default='',
                         help='save a snapshot of the training')
@@ -411,10 +411,10 @@ def main():
                 model, test_data, 'validation/main/bleu', device),
             trigger=(args.validation_interval, 'iteration'))
 
-    print('start training')
-    if args.resume:
+    if args.resume is not None:
         # Resume from a snapshot
         chainer.serializers.load_npz(args.resume, trainer)
+    print('start training')
 
     trainer.run()
 
