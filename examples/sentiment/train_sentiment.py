@@ -132,6 +132,10 @@ def main():
                         help='number of labels')
     parser.add_argument('--epocheval', '-p', type=int, default=5,
                         help='number of epochs per evaluation')
+    parser.add_argument('--out', '-o', default='result',
+                        help='Directory to output the result')
+    parser.add_argument('--resume', '-r', type=str,
+                        help='Resume the training from snapshot')
     parser.add_argument('--test', dest='test', action='store_true')
     parser.set_defaults(test=False)
     args = parser.parse_args()
@@ -161,6 +165,7 @@ def main():
     model = RecursiveNet(len(vocab), n_units, n_label)
 
     if args.gpu >= 0:
+        chainer.backends.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
 
     # Setup optimizer
@@ -176,7 +181,7 @@ def main():
         train_iter, optimizer, device=args.gpu, converter=_convert)
 
     # Setup trainer and run
-    trainer = chainer.training.Trainer(updater, (n_epoch, 'epoch'))
+    trainer = chainer.training.Trainer(updater, (n_epoch, 'epoch'), args.out)
     trainer.extend(
         extensions.Evaluator(validation_iter, model, device=args.gpu,
                              converter=_convert),
@@ -192,6 +197,13 @@ def main():
     trainer.extend(extensions.PrintReport(
         ['epoch', 'main/loss', 'validation/main/loss',
          'main/accuracy', 'validation/main/accuracy', 'elapsed_time']))
+
+    trainer.extend(
+        extensions.snapshot(filename='snapshot_epoch_{.updater.epoch}'),
+        trigger=(epoch_per_eval, 'epoch'))
+
+    if args.resume is not None:
+        chainer.serializers.load_npz(args.resume, trainer)
     trainer.run()
 
     print('Test evaluation')
