@@ -200,14 +200,14 @@ class AdamRule(optimizer.UpdateRule):
             if AdamRule._amsbound_kernel is None:
                 AdamRule._amsbound_kernel = cuda.elementwise(
                     'T grad, T alpha_t, T one_minus_beta1, T one_minus_beta2, '
-                    'T lower, T upper, '
-                    'T eps, T eta, T weight_decay_rate',
+                    'T lower, T upper, T eps, T eta, T weight_decay_rate',
                     'T param, T m, T v, T vhat',
                     '''m += one_minus_beta1 * (grad - m);
                        v += one_minus_beta2 * (grad * grad - v);
                        vhat = max(vhat, v);
-                       param -= eta * (m * max(lower, min(upper, alpha_t / (sqrt(vhat) + eps))) +
-                                       weight_decay_rate * param);''',
+                       param -= eta *
+                           (max(min(alpha_t / (sqrt(vhat) + eps), upper),
+                                lower) * m + weight_decay_rate * param);''',
                     'amsbound')
             AdamRule._amsbound_kernel(
                 grad, self.alpha_t, 1 - hp.beta1,
@@ -219,13 +219,13 @@ class AdamRule(optimizer.UpdateRule):
             if AdamRule._adabound_kernel is None:
                 AdamRule._adabound_kernel = cuda.elementwise(
                     'T grad, T alpha_t, T one_minus_beta1, T one_minus_beta2, '
-                    'T lower, T upper, '
-                    'T eps, T eta, T weight_decay_rate',
+                    'T lower, T upper, T eps, T eta, T weight_decay_rate',
                     'T param, T m, T v',
                     '''m += one_minus_beta1 * (grad - m);
                        v += one_minus_beta2 * (grad * grad - v);
-                       param -= eta * (m * max(lower, min(upper, alpha_t / (sqrt(v) + eps))) +
-                                       weight_decay_rate * param);''',
+                       param -= eta *
+                           (max(min(alpha_t / (sqrt(v) + eps), upper),
+                                lower) * m + weight_decay_rate * param);''',
                     'adabound')
             AdamRule._adabound_kernel(
                 grad, self.alpha_t, 1 - hp.beta1,
