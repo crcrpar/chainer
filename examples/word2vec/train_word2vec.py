@@ -5,9 +5,10 @@ This code implements skip-gram model and continuous-bow model.
 """
 import argparse
 import collections
+import os
+import six
 
 import numpy as np
-import six
 
 import chainer
 from chainer.backends import cuda
@@ -228,6 +229,7 @@ def main():
         raise Exception('Unknown model type: {}'.format(args.model))
 
     if args.gpu >= 0:
+        chainer.backends.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
 
     # Set up an optimizer
@@ -254,7 +256,7 @@ def main():
     trainer.run()
 
     # Save the word2vec model
-    with open('word2vec.model', 'w') as f:
+    with open(os.path.join(args.out, 'word2vec.model'), 'w') as f:
         f.write('%d %d\n' % (len(index2word), args.unit))
         w = cuda.to_cpu(model.embed.W.array)
         for i, wi in enumerate(w):
