@@ -39,6 +39,8 @@ def main():
     parser.add_argument('--model', '-model', default='cnn',
                         choices=['cnn', 'rnn', 'bow'],
                         help='Name of encoder model type.')
+    parser.add_argument('--resume', '-r', type=str,
+                        help='Resume the training from snapshot')
     parser.add_argument('--char-based', action='store_true')
     parser.add_argument('--test', dest='test', action='store_true')
     parser.set_defaults(test=False)
@@ -110,6 +112,8 @@ def main():
     trainer.extend(extensions.snapshot_object(
         model, 'best_model.npz'),
         trigger=record_trigger)
+    trainer.extend(
+        extensions.snapshot(filename='best_snapshot'), trigger=record_trigger)
 
     # Write a log of evaluation statistics for each epoch
     trainer.extend(extensions.LogReport())
@@ -134,6 +138,9 @@ def main():
     model_setup['datetime'] = current_datetime
     with open(os.path.join(args.out, 'args.json'), 'w') as f:
         json.dump(args.__dict__, f)
+
+    if args.resume is not None:
+        chainer.serializers.load_npz(args.resume, trainer)
 
     # Run the training
     trainer.run()
