@@ -4,6 +4,7 @@ import argparse
 import collections
 
 import chainer
+from chainer import training
 from chainer.training import extensions
 
 import babi
@@ -38,9 +39,8 @@ def train(train_data_path, test_data_path, args):
         train_data, args.batchsize)
     test_iter = chainer.iterators.SerialIterator(
         test_data, args.batchsize, repeat=False, shuffle=False)
-    updater = chainer.training.StandardUpdater(
-        train_iter, opt, device=args.gpu)
-    trainer = chainer.training.Trainer(updater, (args.epoch, 'epoch'))
+    updater = training.StandardUpdater(train_iter, opt, device=args.gpu)
+    trainer = training.Trainer(updater, (args.epoch, 'epoch'), args.out)
 
     @chainer.training.make_extension()
     def fix_ignore_label(trainer):
@@ -55,8 +55,7 @@ def train(train_data_path, test_data_path, args):
     trainer.extend(extensions.ProgressBar(update_interval=10))
     trainer.run()
 
-    if args.model:
-        memnn.save_model(args.model, model, vocab)
+    memnn.save_model(args.out, model, vocab)
 
 
 def main():
@@ -68,8 +67,8 @@ def main():
     parser.add_argument('TEST_DATA',
                         help='Path to test data in bAbI dataset '
                         '(e.g. "qa1_single-supporting-fact_test.txt")')
-    parser.add_argument('--model', '-m', default='model',
-                        help='Model directory where it stores trained model')
+    parser.add_argument('--out', '-o', default='result',
+                        help='Directory to output the result')
     parser.add_argument('--batchsize', '-b', type=int, default=100,
                         help='Number of images in each mini batch')
     parser.add_argument('--epoch', '-e', type=int, default=100,
