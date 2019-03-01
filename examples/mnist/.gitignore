@@ -5,6 +5,7 @@ mlp.state
 mnist.pkl
 accuracy.png
 cg.dot
+cg.png
 log
 loss.png
 snapshot_iter_12000
