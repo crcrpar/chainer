@@ -39,6 +39,8 @@ def main():
                         help='GPU ID (negative value indicates CPU)')
     parser.add_argument('--max-caption-length', type=int, default=30,
                         help='Maxium caption length when using LSTM layer')
+    parser.add_argument('--resume', '-r', type=str,
+                        help='Resume the training from snapshot')
     args = parser.parse_args()
 
     # Load the MSCOCO dataset. Assumes that the dataset has been downloaded
@@ -137,6 +139,9 @@ def main():
         trigger=(args.snapshot_iter, 'iteration')
     )
     trainer.extend(extensions.ProgressBar())
+
+    if args.resume is not None:
+        chainer.serializers.load_npz(args.resume, trainer)
     trainer.run()
 
 
