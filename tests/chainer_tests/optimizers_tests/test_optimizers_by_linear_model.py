@@ -187,15 +187,19 @@ class TestAdaGrad(OptimizerTestBase, unittest.TestCase):
 @testing.parameterize(*testing.product({
     'dtype': [numpy.float16, numpy.float32, numpy.float64],
     'use_placeholder': [False, True],
+    'amsgrad': [False, True],
+    'adabound': [False, True],
 }))
 @_inject_backend_tests
 class TestAdam(OptimizerTestBase, unittest.TestCase):
 
     def create(self):
+        kwargs = {
+            'amsgrad': self.amsgrad,
+            'adabound': self.adabound
+        }
         if self.dtype == numpy.float16:
-            kwargs = {'eps': 1e-6}
-        else:
-            kwargs = {}
+            kwargs['eps'] = 1e-6
         return optimizers.Adam(0.05, **kwargs)
 
 
