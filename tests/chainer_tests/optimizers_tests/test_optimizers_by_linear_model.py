@@ -196,7 +196,7 @@ class TestAdam(OptimizerTestBase, unittest.TestCase):
     def create(self):
         kwargs = {
             'amsgrad': self.amsgrad,
-            'adabound': self.adabound
+            'adabound': self.adabound,
         }
         if self.dtype == numpy.float16:
             kwargs['eps'] = 1e-6
