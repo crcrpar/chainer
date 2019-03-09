@@ -1,3 +1,5 @@
+import numpy
+
 import chainer
 from chainer import backend
 from chainer.backends import cuda
@@ -12,6 +14,8 @@ if cuda.cudnn_enabled:
 
 
 class GroupNormalization(function_node.FunctionNode):
+
+    cache_x_hat = False
 
     def __init__(self, groups, eps=1e-5):
         if not isinstance(groups, int):
@@ -59,12 +63,15 @@ class GroupNormalization(function_node.FunctionNode):
         self.mean = x.mean(axis=1)
         x_hat = x - self.mean[:, None]
         var = (x_hat * x_hat).mean(axis=1)
-        var += self.eps
-        self.inv_std = var
+        if xp is cuda.cupy:
+            self.inv_std = cuda.cupyx.rsqrt(var + self.eps)
+        else:
+            self.inv_std = numpy.reciprocal(
+                numpy.sqrt(var + self.eps, dtype=x.dtype))
         del var
-        xp.sqrt(self.inv_std, out=self.inv_std)
-        xp.reciprocal(self.inv_std, out=self.inv_std)
         x_hat *= self.inv_std[:, None]
+        if self.cache_x_hat:
+            self.x_hat = x_hat
 
         y = x_hat.reshape((batch_size, channels, -1))
         y *= gamma[:, None]
@@ -97,6 +104,8 @@ class GroupNormalization(function_node.FunctionNode):
                 x, self.dummy_gamma, dummy_beta, dummy_beta, dummy_beta,
                 self.eps, 1.0, True, libcudnn.CUDNN_BATCHNORM_SPATIAL,
                 configuration.config.debug)
+        if self.cache_x_hat:
+            self.x_hat = cuda.cupy.squeeze(x_hat)
 
         y = x_hat.reshape((batch_size, channels, -1))
         cuda.elementwise(
@@ -117,9 +126,12 @@ class GroupNormalization(function_node.FunctionNode):
         reduced_shape = (batch_size * groups, -1)
         x = x.reshape(reduced_shape)
 
-        x_hat, = _XHat(
-            self.eps, self.mean, self.inv_std,
-            self.dummy_gamma).apply((x,))
+        if self.cache_x_hat:
+            x_hat = self.x_hat
+        else:
+            x_hat, = _XHat(
+                self.eps, self.mean, self.inv_std,
+                self.dummy_gamma).apply((x,))
         gx_hat, ggamma, gbeta = _ScaleShiftGrad().apply((x_hat, gamma, gy))
         gx, = _XHatGrad(
             self.eps, self.mean, self.inv_std,
