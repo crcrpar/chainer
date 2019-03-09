@@ -1,4 +1,5 @@
 import six
+import unittest
 
 import numpy
 
@@ -24,6 +25,53 @@ def _simple_group_normalization(x, groups, gamma, beta, eps=1e-5):
             beta = numpy.expand_dims(beta, i)
 
     return x_hat * gamma + beta
+
+
+@testing.inject_backend_tests(
+    ['test_run', 'test_shape'],
+    [{}]
+    + testing.product({'use_cuda': [True], 'use_cudnn': ['always']})
+)
+class TestXHat(unittest.TestCase):
+
+    def setUp(self):
+        self.shape = (3, 4, 2, 2)
+        self.groups = 2
+        self.backward_reduced_shape = (self.shape[0] * self.groups, -1)
+        self.stat_shape = (self.shape[0] * self.groups,)
+        self.reduced_x_shape = self.stat_shape + (
+            numpy.product(self.shape) // (self.shape[0] * self.groups),)
+        self.dtype = numpy.float32
+        self.eps = 2e-5
+
+    def input(self):
+        x = numpy.random.uniform(-1, 1, self.shape).astype(self.dtype)
+        gamma = numpy.random.uniform(-1, 1, 4).astype(self.dtype)
+        beta = numpy.random.uniform(-1, 1, 4).astype(self.dtype)
+        return x, gamma, beta
+
+    def test_shape(self, backend_config):
+        x, gamma, beta = backend_config.get_array(self.input())
+        gn = gn_module.GroupNormalization(self.groups, self.eps)
+        gn.cache_x_hat = True
+        y, = gn.apply((x, gamma, beta))
+        cached_x_hat = gn.x_hat
+        assert gn.mean.shape == self.stat_shape
+        assert gn.inv_std.shape == self.stat_shape
+        assert y.shape == self.shape
+        assert cached_x_hat.shape == self.reduced_x_shape
+
+    def test_run(self, backend_config):
+        x, gamma, beta = backend_config.get_array(self.input())
+        gn = gn_module.GroupNormalization(self.groups, self.eps)
+        gn.cache_x_hat = True
+        y, = gn.apply((x, gamma, beta))
+        cached_x_hat = gn.x_hat
+
+        fxhat = gn_module._XHat(gn.eps, gn.mean, gn.inv_std, gn.dummy_gamma)
+        xhat, = fxhat.apply((x.reshape(self.backward_reduced_shape),))
+        assert xhat.shape == self.reduced_x_shape
+        testing.assert_allclose(cached_x_hat, xhat.array)
 
 
 @testing.parameterize(*(testing.product({
