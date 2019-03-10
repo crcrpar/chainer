@@ -13,7 +13,7 @@ if cuda.cudnn_enabled:
 
 class GroupNormalization(function_node.FunctionNode):
 
-    def __init__(self, groups, eps=1e-5):
+    def __init__(self, groups, eps=1e-5, mean=None, var=None, decay=0.9):
         if not isinstance(groups, int):
             raise TypeError('Argument: \'groups\' type must be (int).')
 
@@ -22,6 +22,10 @@ class GroupNormalization(function_node.FunctionNode):
         self.mean = None
         self.inv_std = None
         self.dummy_gamma = None
+
+        self.running_mean = mean
+        self.running_var = var
+        self.decay = decay
 
     def check_type_forward(self, in_types):
         type_check.expect(in_types.size() == 3)
@@ -36,6 +40,25 @@ class GroupNormalization(function_node.FunctionNode):
             x_type.shape[1] == gamma_type.shape[0],
             gamma_type.shape == beta_type.shape,
         )
+
+    def _update_moving_averages(self, m, mean=None, var=None):
+        if self.running_mean is not None:
+            if mean is None:
+                self.running_mean *= self.decay
+                mean = self.mean.reshape(-1, self.groups).mean(axis=0)
+                self.running_mean += mean * (1 - self.decay)
+            else:
+                self.running_mean[:] = mean.reshape(
+                    -1, self.groups).mean(axis=0)
+        if self.running_var is not None:
+            if var is None:
+                adjust = m / max(m - 1., 1.)
+                self.running_var *= self.decay
+                var = (self.inv_std - self.eps).reshape(
+                    -1, self.groups).mean(axis=0)
+                self.running_var *= var * adjust * (1 - self.decay)
+            else:
+                self.running_var[:] = var.reshape(-1, self.groups).mean(axis=0)
 
     def forward(self, inputs):
         if inputs[0].shape[1] % self.groups != 0:
@@ -61,6 +84,7 @@ class GroupNormalization(function_node.FunctionNode):
         var = (x_hat * x_hat).mean(axis=1)
         var += self.eps
         self.inv_std = var
+        self._update_moving_averages(x.size // gamma.size)
         del var
         xp.sqrt(self.inv_std, out=self.inv_std)
         xp.reciprocal(self.inv_std, out=self.inv_std)
@@ -92,11 +116,22 @@ class GroupNormalization(function_node.FunctionNode):
         with cuda.get_device_from_array(x):
             dummy_beta = xp.zeros(batch_size * groups, dtype=x.dtype)
             self.dummy_gamma = xp.ones_like(dummy_beta)
+            if self.running_mean is None:
+                dummy_mean = dummy_beta
+            else:
+                dummy_mean = xp.tile(self.running_mean, batch_size)
+            if self.running_var is None:
+                dummy_var = dummy_beta
+            else:
+                dummy_var = xp.tile(self.running_var, batch_size)
         x_hat, self.mean, self.inv_std = \
             cudnn.batch_normalization_forward_training(
-                x, self.dummy_gamma, dummy_beta, dummy_beta, dummy_beta,
+                x, self.dummy_gamma, dummy_beta, dummy_mean, dummy_var,
                 self.eps, 1.0, True, libcudnn.CUDNN_BATCHNORM_SPATIAL,
                 configuration.config.debug)
+
+        self._update_moving_averages(
+            x.size // gamma.size, dummy_mean, dummy_var)
 
         y = x_hat.reshape((batch_size, channels, -1))
         cuda.elementwise(
