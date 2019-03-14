@@ -44,17 +44,6 @@ class TestNonparameterizedLinear(testing.FunctionTestCase):
             self.check_forward_options = {'atol': 1e-3, 'rtol': 1e-2}
         self.n_batch_axes = self.x_shape['n_batch_axes']
 
-    def before_test(self, test_name):
-        # TODO(crcrpar): Remove this relaxation when
-        # a known issue in the reduction of ChainerX is resolved.
-        if test_name == 'test_forward':
-            if (self.x_dtype == numpy.float16 and
-                    self.W_dtype == numpy.float16 and
-                    self.n_batch_axes == 3 and
-                    self.backend_config.use_chainerx and
-                    self.backend_config.chainerx_device == 'native:0'):
-                self.check_forward_options['atol'] = 5e-3
-
     def generate_inputs(self):
         data_shape = self.x_shape['data_shape']
         batch_shape = (4,) + (2,) * (self.n_batch_axes - 1)
