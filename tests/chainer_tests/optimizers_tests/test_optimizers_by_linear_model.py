@@ -227,10 +227,7 @@ class TestAdaGrad(OptimizerTestBase, unittest.TestCase):
 @testing.parameterize(*testing.product({
     'dtype': [numpy.float16, numpy.float32, numpy.float64],
     'use_placeholder': [False, True],
-<<<<<<< HEAD
     'loss_scaling': [False, 'static', 'dynamic'],
-=======
->>>>>>> 5d4cb349c45d321f4f7820d9789df463bad41df4
     'amsgrad': [False, True],
     'adabound': [False, True],
 }))
@@ -242,13 +239,7 @@ class TestAdam(OptimizerTestBase, unittest.TestCase):
             'amsgrad': self.amsgrad,
             'adabound': self.adabound,
         }
-<<<<<<< HEAD
         return optimizers.Adam(0.05)
-=======
-        if self.dtype == numpy.float16:
-            kwargs['eps'] = 1e-6
-        return optimizers.Adam(0.05, **kwargs)
->>>>>>> 5d4cb349c45d321f4f7820d9789df463bad41df4
 
 
 @testing.parameterize(*testing.product({
