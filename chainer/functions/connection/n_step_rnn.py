@@ -492,6 +492,34 @@ class NStepBiRNNReLU(BaseNStepRNN):
             rnn_dir='bi', rnn_mode='rnn_relu', **kwargs)
 
 
+class NStepRNNTanhEx(BaseNStepRNNEx):
+
+    def __init__(self, n_layers, states, lengths, rnn_dir, rnn_mode):
+        super(NStepRNNTanhEx, self).__init__(
+            n_layers, states, lengths, rnn_dir, rnn_mode)
+
+
+class NStepRNNReLUEx(BaseNStepRNNEx):
+
+    def __init__(self, n_layers, states, lengths, rnn_dir, rnn_mode):
+        super(NStepRNNReLUEx, self).__init__(
+            n_layers, states, lengths, rnn_dir, rnn_mode)
+
+
+class NStepBiRNNTanhEx(BaseNStepRNNEx):
+
+    def __init__(self, n_layers, states, lengths, rnn_dir, rnn_mode):
+        super(NStepBiRNNTanhEx, self).__init__(
+            n_layers, states, lengths, rnn_dir, rnn_mode)
+
+
+class NStepBiRNNReLUEx(BaseNStepRNNEx):
+
+    def __init__(self, n_layers, states, lengths, rnn_dir, rnn_mode):
+        super(NStepBiRNNReLUEx, self).__init__(
+            n_layers, states, lengths, rnn_dir, rnn_mode)
+
+
 def n_step_rnn(
         n_layers, dropout_ratio, hx, ws, bs, xs, activation='tanh', **kwargs):
     """n_step_rnn(n_layers, dropout_ratio, hx, ws, bs, xs, activation='tanh')
@@ -774,6 +802,9 @@ use_bi_direction)
     xp = backend.get_array_module(hx)
 
     if xp is cuda.cupy and chainer.should_use_cudnn('>=auto', 5000):
+        if chainer.should_use_cudnn('>=auto', 7210):
+            # XXX(crcrpar): Use new APIs with suffix Ex.
+            pass
         lengths = [len(x) for x in xs]
         xs = chainer.functions.concat(xs, axis=0)
         with chainer.using_device(xs.device):
