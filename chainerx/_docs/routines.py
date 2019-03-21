@@ -1507,6 +1507,25 @@ Note:
     output array to input arrays ``x``, ``W`` and ``b``.
 """)
 
+    _docs.set_doc(
+        chainerx.lstm,
+        """lstm(x, c, h, upwardW, literalW, upwardBias, literalBias)
+LSTM function.
+
+Args:
+    x (~chainerx.ndarray):
+    c (~chainerx.ndarray):
+    h (~chainerx.ndarray):
+    upwardW (~chainerx.ndarray):
+    upwardBias (~chainerx.ndarray):
+    literalW (~chainerx.ndarray):
+    literalBias (~chainerx.ndarray):
+
+Returns:
+    tuple of 2 :class:`~chainerx.ndarray`\\s. The first element is
+    the updated cell state and the other is the outgoing signal.
+""")
+
 
 def _docs_normalization():
     _docs.set_doc(

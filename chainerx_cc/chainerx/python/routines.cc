@@ -701,6 +701,28 @@ void InitChainerxConnection(pybind11::module& m) {
           py::arg("w"),
           py::arg("b") = nullptr,
           py::arg("n_batch_axes") = 1);
+    m.def("lstm",
+          [](const ArrayBodyPtr& x,
+             const ArrayBodyPtr& c,
+             const ArrayBodyPtr& h,
+             const ArrayBodyPtr& upwardW,
+             const nonstd::optional<ArrayBodyPtr>& upwardBias,
+             const ArrayBodyPtr& literalW,
+             const nonstd::optional<ArrayBodyPtr>& literalBias) {
+              return MoveArrayBody(
+                      LSTM(Array{x}, Array{c}, Array{h},
+                           Array{upwardW},
+                           upwardBias.has_value() ? nonstd::optional<Array>{Array{*upwardBias}} : nonstd::nullopt),
+                           Array{literalW},
+                           literalBias.has_value() ? nonstd::optional<Array>{Array{*literalBias}} : nonstd::nullopt);
+          },
+          py::arg("x"),
+          py::arg("c"),
+          py::arg("h"),
+          py::arg("upwardW"),
+          py::arg("upwardBias") = nullptr,
+          py::arg("literalW"),
+          py::arg("literalBias") = nullptr);
 }
 
 void InitChainerxNormalization(pybind11::module& m) {

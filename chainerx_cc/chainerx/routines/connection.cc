@@ -376,4 +376,62 @@ Array Linear(const Array& x, const Array& w, const nonstd::optional<Array>& b, u
     return out_matrix.Reshape(out_shape);
 }
 
+StackVector<Array> LSTM(
+    const Array& x, const Array& c, const Array& h,
+    const Array& upwardW, const nonstd::optional<Array>& upwardBias,
+    const Array& literalW, const nonstd::optional<Array>& literalBias) {
+  CheckEqual(x.dtype(), upwardW.dtype());
+  CheckEqual(x.dtype(), literalW.dtype());
+  if (upwardBias.has_value()) {
+    CheckEqual(x.dtype(), upwardBias.dtype());
+  }
+  if (literalBias.has_value()) {
+    CheckEqual(x.dtype(), literalBias.dtype());
+  }
+  if (x.ndim() != 2) {
+    throw DimensionError("x.ndim should be 2");
+  }
+  if (upwardW.ndim() != 2) {
+    throw DimensionError("The number of dimensions of upwardW should be 1");
+  }
+  if (literalW.ndim() != 2) {
+    throw DimensionError("The number of dimensions of literalW should be 1");
+  }
+  if (upwardBias.has_value() && upwardBias->ndim() != 1) {
+    throw DimensionError("The number of dimensions of upwardBias should be 1");
+  }
+  if (literalBias.has_value() && literalBias->ndim() != 1) {
+    throw DimensionError("The number of dimensions of literalBias should be 1");
+  }
+
+  int8_t ndim = x.ndim;
+  Device& device = x.device();
+  StackVector<Array> out;
+  out.resize(2);
+  // forward
+  Array lstmIn = Linear(x, upwardW, upwardBias, 1);
+  Shape origShape = x.shape();
+  Shape newShape;
+  newShape.resize(ndim + 1);
+  newShape = {origShape[0], origShape[1] / 4, 4};
+  for (auto i = 2; i < ndim; i++) {
+    newShape.push_back(origShape[i]);
+  }
+  std::vector<Array> gateStates = Split(lstmIn.Reshape(newShape), 4, 2);
+  for (size_t i = 0; i < gateStates.size(); i++) {
+    if (i == 0) {
+      gateStates[i] = Tanh(gateStates[i]);
+    }
+    else {
+      gateStates[i] = Sigmoid(gateStates[i]);
+    }
+  }
+  Array newC = gateStates[0] * gateStates[1] + gateStates[2] * gateStates[3];
+  Array concatC = Concatenate(std::vector<Array>{newC, Split(c, 2, 0)[1]}, 0);
+  }
+  out.push_back(Concatenate(std::vector<Array>{newC, Split(c, 2, 0)[1]}), 0);
+  out.push_back(Tanh(newC));
+  return out;
+}
+
 }  // namespace chainerx
