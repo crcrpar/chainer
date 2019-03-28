@@ -1,5 +1,8 @@
+import numpy
+
 import chainer
-from chainer import functions
+from chainer import backend
+from chainer import function_node
 from chainer import link_hook
 
 
@@ -7,7 +10,10 @@ class WeightStandardization(link_hook.LinkHook):
 
     name = 'WeightStandardization'
 
-    def __init__(self, eps=1e-5, weight_name='W', name=None):
+    def __init__(self, axis=0, eps=1e-5, weight_name='W', name=None):
+        if axis != 0:
+            raise ValueError('Invalid axis value.')
+        self.axis = axis
         self.eps = eps
         self.weight_name = weight_name
 
@@ -21,8 +27,6 @@ class WeightStandardization(link_hook.LinkHook):
             'This hook is not supposed to be used as context manager.')
 
     def forward_preprocess(self, cb_args):
-        # This method normalizes target link's weight spectrally
-        # using power iteration method
         link = cb_args.link
         input_variable = cb_args.args[0]
         if not self._initialized:
@@ -42,13 +46,55 @@ class WeightStandardization(link_hook.LinkHook):
         setattr(link, self.weight_name, self.original_weight)
 
     def normalized_weight(self, weight):
-        expander = (Ellipsis, None, None, None)
-        orig_shape = weight.shape
-        reshaped = functions.reshape(weight, (orig_shape[0], -1))
-        mean = functions.mean(reshaped, 1)
-        reshaped = reshaped - mean[expander]
-        reshaped_std = functions.sqrt(
-            functions.sum((reshaped - functions.mean(reshaped)) ** 2, axis=1))
+        return standardize_weight(weight, axis=0, eps=self.eps)
 
-        weight /= (reshaped_std + self.eps)
-        return functions.reshaped(weight, orig_shape)
+
+class StandardizeWeight(function_node.FunctionNode):
+
+    def __init__(self, axis=0, eps=1e-5):
+        self.axis = axis
+        self.eps = eps
+
+    def forward(self, inputs):
+        self.retain_inputs((0,))
+        W = inputs[0]
+        xp = backend.get_array_module(W)
+        self.orig_shape = W.shape
+        out_size = self.orig_shape[self.axis]
+        self.shape_2d = (out_size, numpy.prod(self.orig_shape) // out_size)
+
+        expander = (Ellipsis, None)
+        W = self.reshape_W(xp, W)
+        self.mean = xp.mean(W, axis=1)
+        W -= self.mean[expander]
+        self.std = xp.std(W, axis=1)
+        W /= (self.std + self.eps)[expander]
+        W = self.re_reshape_W(self, xp, W)
+        return W,
+
+    def reshape_W(self, xp, W):
+        if self.axis == 0:
+            return xp.reshape(W, self.shape_2d)
+        self.axes = [self.axis] + [
+            i for i in range(len(self.orig_shape)) if i != self.axis]
+        W = xp.transpose(W, self.axes)
+        return xp.reshape(W, self.shape_2d)
+
+    def re_reshape_W(self, xp, W):
+        if self.axis == 0:
+            return xp.reshape(W, self.orig_shape)
+        tmp_shape = [self.orig_shape[i] for i in self.axes]
+        W = xp.transpose(xp.reshape(W, tmp_shape), self.axes)
+        return W
+
+    def backward(self, indexes, grad_outputs):
+        W, = self.get_retained_inputs()
+        gy, = grad_outputs
+        xp = backend.get_array_module(gy)
+        reshaped_gy = self.reshape_W(xp, gy)
+        reshaped_gy /= (self.std + self.eps)[Ellipsis, None]
+        return self.re_reshape_W(xp, reshaped_gy)
+
+
+def standardize_weight(W, axis, eps):
+    return StandardizeWeight(eps, axis).apply((W,))[0]
