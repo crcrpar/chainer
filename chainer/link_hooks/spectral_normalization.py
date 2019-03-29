@@ -1,7 +1,7 @@
 from chainer import backend
 from chainer import configuration
 import chainer.functions as F
-from chainer import link_hook
+from chainer import link_hooks
 import chainer.links as L
 from chainer import variable
 
@@ -67,7 +67,7 @@ def calculate_max_singular_value(weight_matrix, u, v):
     return sigma
 
 
-class SpectralNormalization(link_hook.LinkHook):
+class SpectralNormalization(link_hooks.WeightNormalizationBase):
     """Spectral Normalization link hook implementation.
 
     This hook normalizes a weight using max singular value and this value
@@ -149,29 +149,15 @@ class SpectralNormalization(link_hook.LinkHook):
         self.eps = eps
         self.use_gamma = use_gamma
         self.factor = factor
-        self.weight_name = weight_name
         self.vector_name = weight_name + '_u'
-        self._initialized = False
         self.axis = 0
-        if name is not None:
-            self.name = name
-
-    def __enter__(self):
-        raise NotImplementedError(
-            'This hook is not supposed to be used as context manager.')
-
-    def __exit__(self):
-        raise NotImplementedError
+        super(SpectralNormalization, self).__init__(weight_name, name)
 
     def added(self, link):
         # Define axis and register ``u`` if the weight is initialized.
-        if not hasattr(link, self.weight_name):
-            raise ValueError(
-                'Weight \'{}\' does not exist!'.format(self.weight_name))
         if isinstance(link, (L.Deconvolution2D, L.DeconvolutionND)):
             self.axis = 1
-        if getattr(link, self.weight_name).array is not None:
-            self._prepare_parameters(link)
+        super(SpectralNormalization, self).added(link)
 
     def deleted(self, link):
         # Remove approximate vector ``u`` and parameter ``gamma` if exists.

@@ -1,8 +1,10 @@
 class WeightNormalizationBase(object):
 
-    def __init__(self, weight_name='W', **kwargs):
+    def __init__(self, weight_name='W', name=None, **kwargs):
         # This attribute represents whether the target link is initialized.
         self.weight_name = weight_name
+        if name is not None:
+            self.name = name
         self.is_initialized = False
 
     def __enter__(self):
@@ -10,12 +12,18 @@ class WeightNormalizationBase(object):
             '"{}" is not supposed to be used as a context manager.'.format(
                 self.name))
 
+    def __exit__(self):
+        raise NotImplementedError(
+            '"{}" is not supposed to be used as a context manager.'.format(
+                self.name))
+
     def added(self, link):
-        if link.W.array is not None:
+        if not hasattr(link, self.weight_name):
+            raise ValueError(
+                'Weight \'{}\' does not exist'.format(self.weight_name))
+        if getattr(link, self.weight_name).array is not None:
             self.is_initialized = True
             self.prepare_params(link)
-        raise NotImplementedError(
-            'WeightNormalizationBase cannot be used directly.')
 
     def forward_preprocess(self, cb_args):
         if not self.is_initialized:
@@ -43,10 +51,8 @@ class WeightNormalizationBase(object):
         link = cb_args.link
         inputs = cb_args.args
         if not hasattr(link, '_initialize_params'):
-            raise RuntimeError('Link cannot be initialized.')
+            raise ValueError('Link cannot be initialized.')
         x = inputs[0]
-        if x is None:
-            raise ValueError()
         link._initialize_params(x.shape[1])
 
         self.is_initialized = True
