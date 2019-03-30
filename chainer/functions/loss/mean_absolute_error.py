@@ -1,8 +1,7 @@
-import numpy
-
 import chainer
 from chainer import backend
 from chainer import function_node
+from chainer.utils import force_array
 from chainer.utils import type_check
 
 
@@ -18,17 +17,10 @@ class MeanAbsoluteError(function_node.FunctionNode):
             in_types[0].shape == in_types[1].shape
         )
 
-    def forward_cpu(self, inputs):
+    def forward(self, inputs):
         x0, x1 = inputs
         self.diff = x0 - x1
-        diff = self.diff.ravel()
-        return numpy.array(abs(diff).sum() / diff.size, dtype=diff.dtype),
-
-    def forward_gpu(self, inputs):
-        x0, x1 = inputs
-        self.diff = x0 - x1
-        diff = self.diff.ravel()
-        return abs(diff).sum() / diff.dtype.type(diff.size),
+        return force_array(abs(self.diff).mean(), dtype=self.diff.dtype),
 
     def backward(self, indexes, grad_outputs):
         gy, = grad_outputs
