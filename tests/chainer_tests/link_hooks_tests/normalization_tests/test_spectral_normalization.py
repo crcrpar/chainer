@@ -5,7 +5,7 @@ import pytest
 
 import chainer
 from chainer.backends import cuda
-from chainer.link_hooks.spectral_normalization import SpectralNormalization
+from chainer.link_hooks.normalization.spectral_normalization import SpectralNormalization  # NOQA
 import chainer.links as L
 from chainer import testing
 from chainer.testing import attr
