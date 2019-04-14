@@ -39,7 +39,7 @@ def prepare_attention(variable_list):
     and an array which represents positions where pads do not exist.
 
     """
-    xp = chainer.cuda.get_array_module(*variable_list)
+    xp = backend.get_array_module(*variable_list)
     batch = len(variable_list)
     lengths = [v.shape[0] for v in variable_list]
     max_len = max(lengths)
