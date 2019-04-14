@@ -33,7 +33,7 @@ def sequence_embed(embed, xs):
 def prepare_attention(variable_list):
     """Preprocess of attention.
 
-    This function pads variables which have diffirent shapes
+    This function pads variables which have different shapes
     such as ``(sequence_length, n_units)``.
     This function returns concatenation of the padded variables
     and an array which represents positions where pads do not exist.
@@ -58,7 +58,7 @@ def split_without_pads(V, lengths):
 
     This function un-pads a variable, that is,
     removes padded parts and split it into variables which have
-    diffirent shapes such as ``(sequence_length, n_units)``.
+    different shapes such as ``(sequence_length, n_units)``.
     This function returns a list of variables.
 
     """
@@ -99,12 +99,12 @@ class AttentionMechanism(chainer.Chain):
             self.W_query = L.Linear(None, self.att_units)
             self.W_key = L.Linear(None, self.att_units)
 
-    def __call__(self, qs, ks):
+    def forward(self, qs, ks):
         """Applies attention mechanism.
         Args:
-            qs (~chainer.Variable): Concatenated query vectors
+            qs (:class:`~chainer.Variable`): Concatenated query vectors.
                 Its shape is (batchsize, n_query, query_units).
-            ks (~chainer.Variable): Concatenated key vectors.
+            ks (`~chainer.Variable): Concatenated key vectors.
                 Its shape is (batchsize, n_key, key_units).
         Returns:
             ~chainer.Variable: Weighted sum of `ks`.
