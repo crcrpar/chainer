@@ -278,10 +278,11 @@ class Link(device_resident.DeviceResident):
 
         # Call forward_preprocess hook
         if hooks:
-            pre_cb_args = link_hook._ForwardPreprocessCallbackArgs(
-                self, 'forward', args, kwargs)
-            for hook in hooks:
-                hook.forward_preprocess(pre_cb_args)
+            with chainer.using_device(self.device):
+                pre_cb_args = link_hook._ForwardPreprocessCallbackArgs(
+                    self, 'forward', args, kwargs)
+                for hook in hooks:
+                    hook.forward_preprocess(pre_cb_args)
 
         # Call the forward function
         # (See #5078) super().__call__ is used when the method is injected by a
@@ -295,10 +296,11 @@ class Link(device_resident.DeviceResident):
 
         # Call forward_postprocess hook
         if hooks:
-            post_cb_args = link_hook._ForwardPostprocessCallbackArgs(
-                self, 'forward', args, kwargs, out)
-            for hook in hooks:
-                hook.forward_postprocess(post_cb_args)
+            with chainer.using_device(self.device):
+                post_cb_args = link_hook._ForwardPostprocessCallbackArgs(
+                    self, 'forward', args, kwargs, out)
+                for hook in hooks:
+                    hook.forward_postprocess(post_cb_args)
 
         return out
 
