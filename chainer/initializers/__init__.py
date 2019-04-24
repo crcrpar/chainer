@@ -101,7 +101,7 @@ def _get_initializer(initializer):
     if numpy.isscalar(initializer):
         return Constant(initializer)
     if isinstance(initializer, numpy.ndarray):
-        return Constant(initializer)
+        return Constant(initializer, initializer.dtype)
 
     if not callable(initializer):
         raise TypeError('invalid type of initializer: %s' % type(initializer))
