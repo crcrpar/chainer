@@ -212,6 +212,7 @@ class BatchNormalization(link.Link):
         self.axis = axis
         self._highprec_dtype = chainer.get_dtype(
             dtype, map_mixed16=numpy.float32)
+        self.map_mixed16 = numpy.float32
 
         with self.init_scope():
             if use_gamma:

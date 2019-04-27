@@ -155,6 +155,7 @@ class Link(device_resident.DeviceResident):
 
         # This flag has to be set before calling add_param().
         self.__init_done = True
+        self.map_mixed16 = None
 
         for name, value in six.iteritems(params):
             shape, dtype = _ensure_shape_dtype(value)
@@ -453,6 +454,18 @@ class Link(device_resident.DeviceResident):
             x = d[name]
             if isinstance(x, chainer.get_array_types()):
                 d[name] = visitor.visit_array(x)
+
+    def cast(self, dtype):
+        dtype = chainer.get_dtype(dtype, map_mixed16=self.map_mixed16)
+        d = self.__dict__
+        for name in self._params:
+            parameter = d[name]
+            parameter.dtype = dtype
+        # persistents cannot exist in the first `__call__` if parameters are initialized lazily.
+        # So, we need a hook that handles lazy initialization for generality or tweak BatchNormalization.
+        for name in self._persistent:
+            persistent = d[name]
+            d[persistent] = persistent.astype(dtype)
 
     def params(self, include_uninit=True):
         # type: (bool) -> tp.Iterator[chainer.Parameter]
@@ -957,6 +970,10 @@ class Chain(Link):
         for name in self._children:
             d[name].device_resident_accept(visitor)
 
+    def cast(self, dtype):
+        for link in self.children():
+            link.cast(dtype)
+
     def params(self, include_uninit=True):
         # type: (bool) -> tp.Iterator[chainer.Parameter]
 
@@ -1174,6 +1191,10 @@ class ChainList(Link, collections_abc.MutableSequence):
             child.name = str(i)
             children[i] = child
         return ret  # type: ignore
+
+    def cast(self, dtype):
+        for link in self.children():
+            link.cast(dtype)
 
     def device_resident_accept(self, visitor):
         super(ChainList, self).device_resident_accept(visitor)
