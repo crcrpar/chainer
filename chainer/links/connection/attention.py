@@ -25,6 +25,20 @@ def normalize(x, axis=-1, eps=1e-5):
     return x / (squared_L2norm + eps)
 
 
+class NormalizedScoreProj(link.Link):
+    def __init__(self, in_size, out_size=None, initialW=None):
+        super(NormalizedScoreProjector, self).__init__()
+        with self.init_scope():
+            self.g = chainer.Parameter(math.sqrt(in_size), shape=(out_size,))
+            self.v = chainer.Parameter(initialW, shape=(out_size, in_units))
+
+    def hybrid_forward(self, x, g, v):
+        v = v / function.sqrt(functions.matmul(v, v, transb=True))
+        weight = functions.matmul(g, v)
+        out = functions.linear(x, weight, None, n_batch_axes=x.ndim - 1)
+        return out
+
+
 class BaseAttention(link.Chain):
 
     """Base abstract class for attention implementations.
