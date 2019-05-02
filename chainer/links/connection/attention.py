@@ -9,11 +9,12 @@ from chainer import links
 from chainer import types  # NOQA
 
 
-def masked_softmax(x, attn_score, mask):
+def masked_softmax(x, attn_score, mask=None):
     if mask is not None:
         xp = backend.get_array_module(x.array)
         neg = -1e5 if x.dtype == numpy.dtype16 else -1e18
-        attn_score = functions.where(mask, attn_score, neg * xp.ones_like(attn_score))
+        attn_score = functions.where(
+            mask, attn_score, neg * xp.ones_like(attn_score))
         attn_weights = functions.softmax(attn_score, axis=-1) * mask
     else:
         attn_weights = functions.softmax(attn_score, axis=-1)
