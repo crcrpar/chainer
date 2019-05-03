@@ -31,6 +31,7 @@ from chainer.links.connection.lstm import StatelessLSTM  # NOQA
 from chainer.links.connection.mgu import StatefulMGU  # NOQA
 from chainer.links.connection.mgu import StatelessMGU  # NOQA
 from chainer.links.connection.mlp_convolution_2d import MLPConvolution2D  # NOQA
+from chainer.links.connection.multihead_attention import MultiHeadAttneion  # NOQA
 from chainer.links.connection.n_step_gru import NStepBiGRU  # NOQA
 from chainer.links.connection.n_step_gru import NStepGRU  # NOQA
 from chainer.links.connection.n_step_lstm import NStepBiLSTM  # NOQA
