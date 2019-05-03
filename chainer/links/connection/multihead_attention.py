@@ -52,8 +52,6 @@ class MultiHeadAttention(link.Chain):
             if the instance of this class is used as self-attention.
         nobias_kv (bool):
             If ``True``, no bias is added to projected key and value.
-        add_zero_attention (bool):
-
 
     See: `Attention Is All You Need<https://arxiv.org/abs/1706.03762>`_
     """
@@ -62,8 +60,8 @@ class MultiHeadAttention(link.Chain):
                  ksize=None, vsize=None,
                  attention_dropout=0.0, post_dropout=0.0, scaling=None,
                  initialW=None, initial_bias=None,
-                 nobias=False, nobias_kv=True, add_zero_attention=False):
-        super(MultiHeadAttention, self).__init()
+                 nobias=False, nobias_kv=True):
+        super().__init__()
 
         if embed_size % n_head != 0:
             raise ValueError('`embed_size` must be divisible by `n_head`')
@@ -81,15 +79,16 @@ class MultiHeadAttention(link.Chain):
         else:
             self.scaling = scaling
 
+        if self._self_attention:
+            ksize = self.embed_size
+            vsize = self.embed_size
         self.ksize = ksize
         self.vsize = vsize
-        self.qkv_same_size = self_attention or (
-            self.ksize == self.embed_size and self.vsize == self.embed_size)
+        self.qkv_same_size = (
+            self.embed_size == self.ksize and self.embed_size == self.vsize)
 
         self.attention_dropout = attention_dropout
         self.post_dropout = post_dropout
-        self.add_zero_attention = add_zero_attention
-
 
         with self.init_scope():
             if initialW is None:
@@ -125,14 +124,14 @@ class MultiHeadAttention(link.Chain):
                 self.bias_k, self.bias_v = None, None
 
     def proj_in(self, x, start_idx=0, end_idx=None):
-        W = self.proj_in_weight[start_idx:end_idx, 0]
+        W = self.proj_in_weight[start_idx:end_idx, :]
         b = self.proj_in_bias
         if b is not None:
             b = b[start_idx:end_idx]
         return functions.linear(x, W, b, n_batch_axes=x.ndim - 1)
 
     def proj_in_qkv(self, query):
-        return functions.split(self.proj_in(query), 3, axis=-1)
+        return functions.split_axis(self.proj_in(query), 3, axis=-1)
 
     def proj_in_query(self, query):
         if self.qkv_same_size:
@@ -166,7 +165,7 @@ class MultiHeadAttention(link.Chain):
                 value, self.proj_v_weight, bias, n_batch_axes=value.ndim - 1)
 
     def forward(self, query, key=None, value=None, key_padding_mask=None,
-                incremental_state=None, return_weights=True,
+                return_weights=False,
                 static_kv=False, attention_mask=None):
         """Compute attention weight and context vector.
 
@@ -191,7 +190,6 @@ class MultiHeadAttention(link.Chain):
                 The shape is (batch_size, source_length).
                 Each value is 0 or 1 where 1 means that
                 the memory slot will not be used.
-            incremental_state(:class:`~chainer.Variable` or :ref:`ndarray`):
             return_weights (bool):
                 If ``True``, return both attention and attention weights.
             static_kv (bool):
@@ -201,10 +199,6 @@ class MultiHeadAttention(link.Chain):
                 The first element is context vector and
                 the second is attention weights.
         """
-
-        # TODO (crcrpar): Support incremental_state.
-        if incremental_state is not None:
-            raise NotImplementedError('`incremental_state` is not supported.')
 
         # TODO (crcrpar): Support cuDNN MultiHeadAttn when CuPy supports it.
         _use_cudnn = False  # NOQA
@@ -217,14 +211,11 @@ class MultiHeadAttention(link.Chain):
         kv_same = key is value
         target_length, batch_size, embed_size = query.shape
 
-        if self.qkv_same:
+        if self.qkv_same_size:
             q, k, v = self.proj_in_qkv(query)
         assert embed_size == self.embed_size, \
             'Expected `embed_size`: {}, Actual: {}'.format(
                 self.embed_size, embed_size)
-
-        # TODO (crcrpar): Support saved_state.
-        _saved_state = None  # NOQA
 
         if self.qkv_same_size:
             q, k, v = self.proj_in_qkv(query)
@@ -241,14 +232,6 @@ class MultiHeadAttention(link.Chain):
             v = self.proj_in_q(value)
 
         q *= self.scaling
-        if k is not None:
-            k = functions.reshape(
-                k, (-1, batch_size * self.n_head, self.head_size))
-            k = functions.transpose(k, (1, 0, 2))
-        if v is not None:
-            v = functions.reshape(
-                v, (-1, batch_size * self.n_head, self.head_size))
-            v = functions.transpose(v, (1, 0, 2))
 
         if self.bias_k is not None:
             k = functions.concat(
@@ -268,6 +251,17 @@ class MultiHeadAttention(link.Chain):
                             dtype=key_padding_mask.dtype
                         )
                     ), axis=1)
+        q = functions.reshape(
+            q, (target_length, batch_size * self.n_head, self.head_size))
+        q = functions.transpose(q, (1, 0) + tuple(range(2, q.ndim)))
+        if k is not None:
+            k = functions.reshape(
+                k, (-1, batch_size * self.n_head, self.head_size))
+            k = functions.transpose(k, (1, 0, 2))
+        if v is not None:
+            v = functions.reshape(
+                v, (-1, batch_size * self.n_head, self.head_size))
+            v = functions.transpose(v, (1, 0, 2))
 
         attention_weights = functions.matmul(
             q, functions.transpose(k, (0, 2, 1)))
@@ -278,25 +272,6 @@ class MultiHeadAttention(link.Chain):
         if key_padding_mask is not None:
             assert key_padding_mask.shape[:2] == (batch_size, source_length)
 
-        if self.add_zero_attention:
-            source_length += 1
-            k = functions.concat(
-                (k, self.xp.zeros((len(k), 1) + k.shape[2:])), axis=1)
-            v = functions.concat(
-                (v, self.xp.zeros((len(v), 1) + v.shape[2:])), axis=1)
-            if attention_mask is not None:
-                attention_mask = functions.concat(
-                    (
-                        attention_mask,
-                        self.xp.zeros((len(attention_mask), 1))
-                    ), axis=1)
-            if key_padding_mask is not None:
-                key_padding_mask = functions.concat(
-                    (
-                        key_padding_mask,
-                        self.xp.zeros((len(key_padding_mask), 1))
-                    ), axis=1)
-
         attention_weights = masked_softmax(attention_weights, key_padding_mask)
         attention_weights = functions.dropout(
             attention_weights, self.attention_dropout)
@@ -306,6 +281,11 @@ class MultiHeadAttention(link.Chain):
                 attention, (1, 0) + tuple(range(2, attention.ndim))),
             (target_length, batch_size, embed_size))
 
+        self.prev_attention_weights = attention_weights
+        self.prev_attention_weights.unchain()
         if return_weights:
-            return attention, attention_weights
+            attention_weights = functions.reshape(
+                attention_weights,
+                (batch_size, self.n_head, target_length, source_length))
+            return attention, functions.mean(attention_weights, axis=1)
         return attention
