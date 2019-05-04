@@ -12,6 +12,7 @@ from chainer import variable
 
 
 def masked_softmax(x, mask=None):
+    # type: (variable.Variable, tp.Optional[variable.Variable]) -> variable.Variable  # NOQA
     if mask is not None:
         xp = backend.get_array_module(x.array)
         neg = -1e5 if x.dtype == numpy.dtype16 else -1e18
@@ -61,6 +62,7 @@ class MultiHeadAttention(link.Chain):
                  attention_dropout=0.0, post_dropout=0.0, scaling=None,
                  initialW=None, initial_bias=None,
                  nobias=False, nobias_kv=True):
+        # type (int, int, tp.Optional[bool], tp.Optional[int], tp.Optional[int], tp.Optional[float], tp.Optional[float], tp.Optional[float], tp.Optional[types.InitializerSpec], tp.Optional[types.InitializerSpec], tp.Optional[bool], tp.Optional[bool]) -> 'MultiHeadAttention'  # NOQA
         super().__init__()
 
         if embed_size % n_head != 0:
@@ -97,17 +99,17 @@ class MultiHeadAttention(link.Chain):
                 _initial_bias = initializers.Zero()
             if self.qkv_same_size:
                 self.proj_in_weight = variable.Parameter(
-                    _initialW, (3 * self.embed_size, self.embed_size))
+                    _initialW, (3 * self.embed_size, self.embed_size))  # type: variable.Variable  # NOQA
             else:
                 self.proj_k_weight = variable.Parameter(
-                    _initialW, (self.embed_size, self.ksize))
+                    _initialW, (self.embed_size, self.ksize))  # type: variable.Variable  # NOQA
                 self.proj_v_weight = variable.Parameter(
-                    _initialW, (self.embed_size, self.vsize))
+                    _initialW, (self.embed_size, self.vsize))  # type: variable.Variable  # NOQA
                 self.proj_q_weight = variable.Parameter(
-                    _initialW, (self.embed_size, self.embed_size))
+                    _initialW, (self.embed_size, self.embed_size))  # type: variable.Variable  # NOQA
             if not nobias:
                 self.proj_in_bias = variable.Parameter(
-                    _initial_bias, (3 * self.embed_size,))
+                    _initial_bias, (3 * self.embed_size,))  # type: variable.Variable  # NOQA
             else:
                 self.proj_in_bias = None
 
@@ -117,13 +119,14 @@ class MultiHeadAttention(link.Chain):
 
             if not nobias_kv:
                 self.bias_k = variable.Parameter(
-                    _initial_bias, (self.embed_size,))
+                    _initial_bias, (self.embed_size,))  # type: variable.Variable  # NOQA
                 self.bias_v = variable.Parameter(
-                    _initial_bias, (self.embed_size,))
+                    _initial_bias, (self.embed_size,))  # type: variable.Variable  # NOQA
             else:
                 self.bias_k, self.bias_v = None, None
 
     def proj_in(self, x, start_idx=0, end_idx=None):
+        # type: (variable.Variable, tp.Optional[int], tp.Optional[int]) -> variable.Variable  # NOQA
         W = self.proj_in_weight[start_idx:end_idx, :]
         b = self.proj_in_bias
         if b is not None:
@@ -131,9 +134,11 @@ class MultiHeadAttention(link.Chain):
         return functions.linear(x, W, b, n_batch_axes=x.ndim - 1)
 
     def proj_in_qkv(self, query):
+        # type: (variable.Variable) -> variable.Variable  # NOQA
         return functions.split_axis(self.proj_in(query), 3, axis=-1)
 
     def proj_in_query(self, query):
+        # type: (variable.Variable) -> variable.Variable  # NOQA
         if self.qkv_same_size:
             return self.proj_in(query, end=self.embed_size)
         else:
@@ -144,6 +149,7 @@ class MultiHeadAttention(link.Chain):
                 query, self.proj_q_weight, bias, n_batch_axes=query.ndim - 1)
 
     def proj_in_key(self, key):
+        # type: (variable.Variable) -> variable.Variable  # NOQA
         if self.qkv_same_dim:
             return self.proj_in(
                 key, start=self.embed_size, end=2 * self.embed_size)
@@ -155,6 +161,7 @@ class MultiHeadAttention(link.Chain):
                 key, self.proj_k_weight, bias, n_batch_axes=key.ndim - 1)
 
     def proj_in_v(self, value):
+        # type: (variable.Variable) -> variable.Variable  # NOQA
         if self.qkv_same_size:
             return self.proj_in(value, start=2 * self.embed_size)
         else:
@@ -165,8 +172,8 @@ class MultiHeadAttention(link.Chain):
                 value, self.proj_v_weight, bias, n_batch_axes=value.ndim - 1)
 
     def forward(self, query, key=None, value=None, key_padding_mask=None,
-                return_weights=False,
-                static_kv=False, attention_mask=None):
+                attention_mask=None, return_weights=False):
+        # type: (variable.Variable, tp.Optional[variable.Variable], tp.Optional[variable.Variable], tp.Optional[variable.Variable], tp.Optional[bool]) -> tp.Union[tp.Tuple[variable.Variable, variable.Variable], variable.Variable]  # NOQA
         """Compute attention weight and context vector.
 
         Self-attention can be implemented by passing the same arguments for
@@ -190,10 +197,9 @@ class MultiHeadAttention(link.Chain):
                 The shape is (batch_size, source_length).
                 Each value is 0 or 1 where 1 means that
                 the memory slot will not be used.
+            attention_mask (:class:`~chainer.Variable` or :ref:`ndarray`)
             return_weights (bool):
                 If ``True``, return both attention and attention weights.
-            static_kv (bool):
-            attention_mask (:class:`~chainer.Variable` or :ref:`ndarray`)
         Returns:
             tuple of :class:`~chainer.Variable`\\s.
                 The first element is context vector and
@@ -201,7 +207,12 @@ class MultiHeadAttention(link.Chain):
         """
 
         # TODO (crcrpar): Support cuDNN MultiHeadAttn when CuPy supports it.
-        _use_cudnn = False  # NOQA
+
+        if self._self_attention:
+            if key is None:
+                key = query
+            if value is None:
+                value = query
 
         qkv_same = (query is key) and (query is value)
         if self._self_attention and not qkv_same:
