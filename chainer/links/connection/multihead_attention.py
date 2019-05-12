@@ -34,7 +34,7 @@ class MultiHeadAttention(link.Chain):
             The size of input query vectors
             and projected query, key, and value vectors.
         self_attention (bool): If ``True``, this becomes self-attention.
-        kize (int):
+        ksize (int):
             The size of input key vectors.
         vsize (int):
             The size of input value vectors.
@@ -66,9 +66,13 @@ class MultiHeadAttention(link.Chain):
         super().__init__()
 
         if embed_size % n_head != 0:
-            raise ValueError('`embed_size` must be divisible by `n_head`')
+            raise ValueError(
+                '`embed_size` ({}) must be divisible by `n_head` ({})'.format(
+                    embed_size, n_head))
         if not self_attention and (ksize is None or vsize is None):
-            raise ValueError('`ksize` and `vsize` are necessary.')
+            raise ValueError(
+                '`ksize` and `vsize` are required '
+                'if `self_attention` is `False`.')
         else:
             ksize = embed_size
             vsize = embed_size
@@ -98,7 +102,7 @@ class MultiHeadAttention(link.Chain):
             if initial_bias is None:
                 _initial_bias = initializers.Zero()
             if self.qkv_same_size:
-                self.proj_in_weight = variable.Parameter(
+                self.proj_in_W = variable.Parameter(
                     _initialW, (3 * self.embed_size, self.embed_size))  # type: variable.Variable  # NOQA
             else:
                 self.proj_k_weight = variable.Parameter(
@@ -127,7 +131,7 @@ class MultiHeadAttention(link.Chain):
 
     def proj_in(self, x, start_idx=0, end_idx=None):
         # type: (variable.Variable, tp.Optional[int], tp.Optional[int]) -> variable.Variable  # NOQA
-        W = self.proj_in_weight[start_idx:end_idx, :]
+        W = self.proj_in_W[start_idx:end_idx, :]
         b = self.proj_in_bias
         if b is not None:
             b = b[start_idx:end_idx]

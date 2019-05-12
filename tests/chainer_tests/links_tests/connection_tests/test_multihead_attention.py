@@ -1,169 +1,206 @@
+import random
 import unittest
 
 import numpy
-import pytest
 
 import chainer
+from chainer.backends import cuda
 from chainer import functions
 from chainer import links
 from chainer import testing
 
 
-def _matmul(x, y, transa=False, transb=False):
-    with chainer.no_backprop_mode(), \
-            chainer.using_config('use_cuda', False), \
-            chainer.using_config('use_chainerx', False):
-        out = functions.matmul(x, y, transa=transa, transb=transb).array
-    return out
+class TestMultiheadAttention(unittest.TestCase):
+    # ref: https://github.com/pytorch/pytorch/blob/163f0e182c7e092d6b61600e3a5e20347abab848/test/test_nn.py#L3240
+
+    def test_multihead_attention(self):
+        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=False, src_lengths=None):
+            """ Numpy-based reference implementation of scaled dot attention
+            for testing"""
+            QKT = _batchmatmul(
+                Q,
+                numpy.transpose(K, axes=[0, 1, 3, 2])
+                / numpy.sqrt(dims[3], dtype=numpy.float32),  # divide by sqrt(d_head)
+            )
+            if unseen_mask or src_lengths is not None:
+                b1, b2, s1, s2 = QKT.shape
+                # assert s1 == s2
+                for i in range(b1):
+                    for j in range(b2):
+                        for m in range(s1):
+                            for n in range(s2):
+                                if unseen_mask and n > m:
+                                    QKT[i, j, m, n] = -numpy.inf
+                                if src_lengths is not None and n >= src_lengths[i]:
+                                    QKT[i, j, m, n] = -numpy.inf
+            reference = _softmax(QKT)
+            reference = _batchmatmul(reference, V)
+            return reference
+
+        def _batchmatmul(a, b):  # batchmatmul over 4 dim matrix
+            """ Numpy-based batch matrix multiply over 4 dim matrix"""
+            assert a.shape[0] == b.shape[0]
+            assert a.shape[1] == b.shape[1]
+            retval = numpy.zeros(
+                (a.shape[0], a.shape[1], a.shape[2], b.shape[3]), dtype=numpy.float32
+            )
+            for i in range(a.shape[0]):
+                for j in range(a.shape[1]):
+                    retval[i, j, :, :] = numpy.matmul(a[i, j, :, :], b[i, j, :, :])
+            return retval
+
+        def _softmax(x):  # softmax over 4 dim matrix
+            """ Numpy-based reference softmax over 4 dim matrix"""
+            output = numpy.zeros(x.shape, dtype=numpy.float32)
+            for i in range(x.shape[0]):
+                for j in range(x.shape[1]):
+                    for k in range(x.shape[2]):
+                        x_curr = x[i, j, k, :]
+                        e_x = numpy.exp(x_curr - numpy.amax(x_curr))
+                        output[i, j, k, :] = e_x / numpy.sum(e_x)
+            return output
+
+        def _generate_src_lengths(batch_size, seq_len):
+            src_lengths = numpy.array([random.randint(1, seq_len) for i in range(batch_size)])
+
+            # max source length has to equal seq_len, so randomly choose
+            # one example to have source length = seq_len
+            max_len_example_i = random.randint(0, batch_size - 1)
+            src_lengths[max_len_example_i] = seq_len
+
+            src_lengths_tensor = src_lengths.astype(numpy.int32)
+            return src_lengths, src_lengths_tensor
+
+        def _split_heads_ref(X, dims, nheads, d_head):
+            X_split = numpy.reshape(X, dims[:2] + [nheads, d_head])
+            X_split_transposed = numpy.transpose(X_split, [0, 2, 1, 3])
+            reference = numpy.reshape(X_split_transposed, [dims[0], nheads, dims[1], d_head])
+            return reference
+
+        def _combine_heads_ref(X, dims, nheads, d_head):
+            X_transposed = numpy.transpose(X, [0, 2, 1, 3])
+            reference = numpy.reshape(X_transposed, dims[:2] + [nheads * d_head])
+            return reference
+
+        def _fc(X, X_name, module, start=None, end=None):
+            X_fc_b = None
+            X_fc_w = None
+            for name, param in module.namedparams():
+                if X_name + "W" in name:
+                    if X_fc_w is not None:
+                        raise Exception("Duplicate FC name found")
+                    X_fc_w = param[start:end, :].array
+                elif X_name + "b" in name:
+                    if X_fc_b is not None:
+                        raise Exception("Duplicate FC name found")
+                    X_fc_b = param[start:end].array
+            return numpy.matmul(X, numpy.transpose(X_fc_w)) + X_fc_b
+
+        def _create_src_lengths_mask(batch_size, src_lengths):
+            """
+            Generate boolean mask to prevent attention beyond the end of source
+            Inumpyuts:
+              batch_size : int
+              src_lengths : [batch_size] of sentence lengths
+            Outputs:
+              [batch_size, max_src_len]
+            """
+            max_srclen = src_lengths.max()
+            src_indices = numpy.arange(max_srclen)[None, Ellipsis].astype(src_lengths.dtype)
+            src_indices = numpy.broadcast_to(src_indices, (batch_size, max_srclen))
+            src_lengths = numpy.broadcast_to(
+                numpy.expand_dims(src_lengths, 1), (batch_size, max_srclen))
+            # returns [batch_size, max_seq_len]
+            return (src_indices < src_lengths).astype(numpy.int32)
+
+        def _multihead_attn_test_helper(use_src_lengths):
+            for _ in range(100):
+                batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
+                d_head = random.randint(3, 10)
+                nheads = random.randint(3, 10)
+                d_model = d_head * nheads
+                dims = [batch_sz, seq_len, d_model]
+
+                src_lengths = None
+                src_lengths_tensor = None
+                if use_src_lengths:
+                    src_lengths, src_lengths_tensor = _generate_src_lengths(
+                        batch_size=batch_sz, seq_len=seq_len
+                    )
+
+                decoder_state = numpy.random.rand(batch_sz, d_model).astype(numpy.float32)
+                K = numpy.random.rand(*dims).astype(numpy.float32)
+                V = K
+                Q = numpy.expand_dims(decoder_state, 1)
+
+                decoder_state_tensor = decoder_state.copy()
+                source_hid_tensor = numpy.transpose(
+                    K.copy(), (1, 0) + tuple(range(2, K.ndim)))
+
+                multihead_attn_module = links.MultiHeadAttention(
+                    nheads, d_model, False,
+                    source_hid_tensor.shape[-1], source_hid_tensor.shape[-1])
+
+                _batch_size = len(decoder_state_tensor)
+                _Q = numpy.expand_dims(decoder_state_tensor, 1)
+                _Q = numpy.transpose(_Q, (1, 0) + tuple(range(2, _Q.ndim)))
+                _V = source_hid_tensor
+                _K = source_hid_tensor
+                src_len_mask = None
+                if src_lengths is not None and use_src_lengths:
+                    # [batch_size, 1, seq_len]
+                    src_len_mask_int = _create_src_lengths_mask(
+                        batch_size=_batch_size, src_lengths=src_lengths_tensor
+                    )
+                    src_len_mask = src_len_mask_int != 1
+
+                result = multihead_attn_module(
+                    _Q, _K, _V,
+                    key_padding_mask=src_len_mask,
+                    return_weights=True)[0].array
+                result = cuda.to_cpu(result).squeeze(0)
+
+                Q_fc = _fc(Q, "/proj_in_", multihead_attn_module, end=d_model)
+                K_fc = _fc(
+                    K, "/proj_in_", multihead_attn_module, start=d_model, end=2 * d_model
+                )
+                V_fc = _fc(V, "/proj_in_", multihead_attn_module, start=2 * d_model)
+
+                Q_split = _split_heads_ref(
+                    Q_fc, [batch_sz, 1, d_model], nheads, d_head
+                )
+                K_split = _split_heads_ref(K_fc, dims, nheads, d_head)
+                V_split = _split_heads_ref(V_fc, dims, nheads, d_head)
+
+                attn_heads = _scaled_dot_attn_ref(
+                    Q=Q_split,
+                    K=K_split,
+                    V=V_split,
+                    dims=Q_split.shape,
+                    src_lengths=src_lengths,
+                )
+
+                combined_attn_heads = _combine_heads_ref(
+                    X=attn_heads, dims=[batch_sz, 1], nheads=nheads, d_head=d_head
+                )
+
+                reference = _fc(
+                    combined_attn_heads, "/out_proj/", multihead_attn_module
+                )
+                reference = numpy.squeeze(reference, axis=1)
+
+                # result = reference
+                assert result.shape == (batch_sz, d_model)
+                numpy.testing.assert_allclose(result, reference, atol=1e-5)
+
+        def test_multihead_attn_no_masking():
+            _multihead_attn_test_helper(use_src_lengths=None)
+
+        def test_multihead_attn_with_src_lengths():
+            _multihead_attn_test_helper(use_src_lengths=True)
+
+        test_multihead_attn_no_masking()
+        test_multihead_attn_with_src_lengths()
 
 
-def _softmax(x, axis=-1):
-    with chainer.no_backprop_mode(), \
-            chainer.using_config('use_cuda', False), \
-            chainer.using_config('use_chainerx', False):
-        y = functions.softmax(x, axis=axis).array
-    return y
-
-
-def _scaled_dot_attention(q, k, v, shape, unseen_mask=False, source_lengths=None):
-    qkt = _matmul(q, numpy.transpose(k, (0, 1, 3, 2)) / numpy.sqrt(shape[3], dtype=q.dtype))
-
-    if unseen_mask or source_lengths is not None:
-        b1, b2, s1, s2 = qkt.shape
-        for i in range(b1):
-            for j in range(b2):
-                for m in range(s1):
-                    for n in range(s2):
-                        if unseen_mask or n > m:
-                            qkt[i, j, m, n] = -numpy.inf
-                        if (source_lengths is not None
-                                and n >= source_lengths[i]):
-                            qkt[i, j, m, n] = -numpy.inf
-    ref = _softmax(qkt)
-    ref = _matmul(ref, v)
-    return ref
-
-
-def _generate_source_lengths(batch_size, sequence_length):
-    source_lengths = numpy.random.randint(1, sequence_length + 1, (batch_size,))
-    # max source length has to be equal to seqence_length, so that
-    # randomly choose one example to have source_length = sequence_length
-    source_lengths[numpy.random.randint(batch_size)] = sequence_length
-    source_length_tensor = source_lengths.astype(numpy.int32)
-    return source_lengths, source_length_tensor
-
-
-def _split_heads_ref(x, shape, n_head, d_head):
-    x_split = numpy.reshape(x, shape[:2] + (n_head, d_head))
-    x_split_T = numpy.transpose(x_split, (0, 2, 1, 3))
-    ref = numpy.reshape(x_split_T, (shape[0], n_head, shape[1], d_head))
-    return ref
-
-
-def _combine_heads_ref(x, shape, n_head, d_head):
-    x_T = numpy.transpose(x, (0, 2, 1, 3))
-    ref = numpy.reshape(x_T, shape[:2] + (n_head * d_head,))
-    return ref
-
-
-def _create_source_lengths_mask(batch_size, source_lengths):
-    max_source_length = numpy.max(source_lengths)
-    source_indices = numpy.arange(
-        max_source_length)[None, Ellipsis].astype(source_lengths.dtype)
-    source_indices = numpy.broadcast(
-        source_indices, (batch_size, max_source_length))
-    source_lengths = numpy.broadcast(
-        source_lengths[Ellipsis, None], (batch_size, max_source_length))
-    return source_indices < source_lengths
-
-
-def _fc(x, x_name, model, start=None, end=None):
-    x_fc_W, x_fc_b = None, None
-    for name, param in model.named_params():
-        if x_name + 'W' in name:
-            assert x_fc_W is None
-            x_fc_W = param.array[start:end, :]
-        if x_name + 'b' in name:
-            assert x_fc_b is None
-            x_fc_b = param.array[start:end]
-    return numpy.matmul(x, x_fc_W.T) + x_fc_b
-
-
-@testing.parameterize(*testing.product({
-    'dtype': [numpy.float16, numpy.float32, numpy.float64],
-    'embed_size': [5],
-    'self_attention': [True, False],
-    'n_head': [1, 4],
-    'qsize': [10],
-    'ksize': [12],
-    'vsize': [14],
-    'attention_dropout': [0.0, 0.5],
-    'post_dropout': [0.0, 0.5],
-    'scaling': [None, 1.0],
-    'initialW': [None],
-    'initial_bias': [None],
-    'nobias': [True, False],
-    'nobias_kv': [True, False],
-    'use_source_lengths': [True, False],
-}))
-class TestMultiHeadAttention(unittest.TestCase):
-
-    def setUp(self):
-        self.link = links.MultiHeadAttention(
-            self.n_head, self.embed_size, self.self_attention,
-            self.ksize, self.vsize,
-            self.attention_dropout, self.post_dropout, self.scaling,
-            self.initialW, self.initial_bias, self.nobias, self.nobias_kv)
-        for param in self.link.params():
-            param.array[:] = param.array.astype(self.dtype)
-
-    def test_forward(self):
-        batch_size, sequence_length = numpy.random.randint(2, 11, (2,))
-        d_head, n_head = numpy.random.randint(3, 11)
-        d_model = d_head * n_head
-        shape = [batch_size, sequence_length, d_model]
-
-        source_lengths = None
-        source_lengths_tensor = None
-        if self.use_source_lengths:
-            source_lengths, source_lengths_tensor = _generate_source_lengths(
-                batch_size, sequence_length)
-
-        decoder_state = numpy.random.rand(
-            batch_size, d_model).astype(self.dtype)
-        k = numpy.random.rand(*shape).astype(self.dtype)
-        v = k
-        q = numpy.expand_dims(decoder_state, 1)
-        decoder_state_tensor = numpy.copy(decoder_state)
-        source_hidden_tensor = numpy.transpose(
-            k, (1, 0) + tuple(range(2, len(shape))))
-
-        _bs = len(decoder_state_tensor)
-        _q = numpy.expand_dims(q, 1)
-        _q = numpy.transpose(_q, (1, 0) + tuple(range(2, _q.ndim)))
-        _k = source_hidden_tensor
-        _v = source_hidden_tensor
-        source_length_mask = None
-        if source_lengths is not None and self.use_source_lengths:
-            source_length_mask_int = _create_source_lengths_mask(
-                _bs, source_lengths_tensor)
-            source_length_mask = source_length_mask != 1
-
-        result = self.link(_q, _k, _v, key_padding_mask=source_length_mask,
-                           return_weights=False)
-
-        q_fc = _fc(_q, "proj_in_", self.link, end=d_model)
-        k_fc = _fc(_k, "proj_in_", self.link, start=d_model, end=2 * d_model)
-        v_fc = _fc(_v, "proj_in_", self.link, start=2 * d_model)
-        q_split = _split_heads_ref(
-            q_fc, (batch_size, 1, d_model), n_head, d_head)
-        k_split = _split_heads_ref(k_fc, shape, n_head, d_head)
-        v_split = _split_heads_ref(v_fc, shape, n_head, d_head)
-
-        attention_heads = _scaled_dot_attention(
-            q_split, k_split, v_split, shape, source_lengths=source_lengths)
-
-        combined_attention_heads = _combine_heads_ref(
-            attention_heads, (batch_size, 1), n_head, d_head)
-        reference = _fc(combined_attention_heads, "proj_out.", self.link)
-        reference = numpy.squeeze(reference, axis=1)
+testing.run_module(__name__, __file__)
