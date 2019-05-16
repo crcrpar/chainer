@@ -11,6 +11,9 @@ from chainer import types  # NOQA
 from chainer import variable
 
 
+InputType = tp.Union[variable.Variable, types.NdArray]
+
+
 def masked_softmax(x, mask=None):
     # type: (variable.Variable, tp.Optional[variable.Variable]) -> variable.Variable  # NOQA
     if mask is not None:
@@ -57,12 +60,22 @@ class MultiHeadAttention(link.Chain):
     See: `Attention Is All You Need<https://arxiv.org/abs/1706.03762>`_
     """
 
-    def __init__(self, n_head, embed_size, self_attention=False,
-                 ksize=None, vsize=None,
-                 attention_dropout=0.0, post_dropout=0.0, scaling=None,
-                 initialW=None, initial_bias=None,
-                 nobias=False, nobias_kv=True):
-        # type (int, int, tp.Optional[bool], tp.Optional[int], tp.Optional[int], tp.Optional[float], tp.Optional[float], tp.Optional[float], tp.Optional[types.InitializerSpec], tp.Optional[types.InitializerSpec], tp.Optional[bool], tp.Optional[bool]) -> 'MultiHeadAttention'  # NOQA
+    def __init__(
+        self,
+        n_head,                 # type: int
+        embed_size,             # type: int
+        self_attention=False,   # type: tp.Optional[bool]
+        ksize=None,             # type: tp.Optional[int]
+        vsize=None,             # type: tp.Optional[int]
+        attention_dropout=0.0,  # type: tp.Optional[float]
+        post_dropout=0.0,       # type: tp.Optional[float]
+        scaling=None,           # type: tp.Optional[float]
+        initialW=None,          # type: tp.Optional[types.InitializerSpec]
+        initial_bias=None,      # type: tp.Optional[types.InitializerSpec]
+        nobias=False,           # type: tp.Optional[bool]
+        nobias_kv=True          # type: tp.Optional[bool]
+    ):
+        # type (...) -> None
         super().__init__()
 
         if embed_size % n_head != 0:
@@ -120,6 +133,8 @@ class MultiHeadAttention(link.Chain):
             self.out_proj = links.Linear(
                 self.embed_size, self.embed_size,
                 initialW=_initialW, initial_bias=_initial_bias, nobias=nobias)
+            self.proj_out_W = self.out_proj.W
+            self.proj_out_b = self.out_proj.b
 
             if not nobias_kv:
                 self.bias_k = variable.Parameter(
@@ -140,6 +155,10 @@ class MultiHeadAttention(link.Chain):
     def proj_in_qkv(self, query):
         # type: (variable.Variable) -> variable.Variable  # NOQA
         return functions.split_axis(self.proj_in(query), 3, axis=-1)
+
+    def proj_in_kv(self, key):
+        # type: (variable.Variable) -> variable.Variable  # NOQA
+        return functions.split_axis(self.proj_in(key, self.embed_size), 2, axis=-1)
 
     def proj_in_query(self, query):
         # type: (variable.Variable) -> variable.Variable  # NOQA
@@ -164,7 +183,7 @@ class MultiHeadAttention(link.Chain):
             return functions.linear(
                 key, self.proj_k_weight, bias, n_batch_axes=key.ndim - 1)
 
-    def proj_in_v(self, value):
+    def proj_in_value(self, value):
         # type: (variable.Variable) -> variable.Variable  # NOQA
         if self.qkv_same_size:
             return self.proj_in(value, start=2 * self.embed_size)
@@ -175,9 +194,16 @@ class MultiHeadAttention(link.Chain):
             return functions.linear(
                 value, self.proj_v_weight, bias, n_batch_axes=value.ndim - 1)
 
-    def forward(self, query, key=None, value=None, key_padding_mask=None,
-                attention_mask=None, return_weights=False):
-        # type: (variable.Variable, tp.Optional[variable.Variable], tp.Optional[variable.Variable], tp.Optional[variable.Variable], tp.Optional[bool]) -> tp.Union[tp.Tuple[variable.Variable, variable.Variable], variable.Variable]  # NOQA
+    def forward(
+        self,
+        query,                  # type: tp.Optional[InputType]
+        key=None,               # type: tp.Optional[InputType]
+        value=None,             # type: tp.Optional[InputType]
+        key_padding_mask=None,  # type: tp.Optional[InputType]
+        attention_mask=None,    # type: tp.Optional[InputType]
+        return_weights=False    # type: tp.Optional[bool]
+    ):
+        # type: (...) -> tp.Union[tp.Tuple[variable.Variable, variable.Variable], variable.Variable]
         """Compute attention weight and context vector.
 
         Self-attention can be implemented by passing the same arguments for
@@ -205,11 +231,11 @@ class MultiHeadAttention(link.Chain):
             return_weights (bool):
                 If ``True``, return both attention and attention weights.
         Returns:
-            tuple of :class:`~chainer.Variable`\\s.
-                The first element is context vector and
-                the second is attention weights.
+            tuple of :class:`~chainer.Variable`\\s if `return_weights` is ``True``.
+            Otherwise, :class:`~chainer.Variable`.
+                The first element is context vector shaped :math:`(L, B, E)`
+                the second is attention weights shaped :math:`(B, L, S)`.
         """
-
         # TODO (crcrpar): Support cuDNN MultiHeadAttn when CuPy supports it.
 
         if self._self_attention:
@@ -235,16 +261,15 @@ class MultiHeadAttention(link.Chain):
         if self.qkv_same_size:
             q, k, v = self.proj_in_qkv(query)
         elif kv_same:
-            q = self.proj_in_q(query)
+            q = self.proj_in_query(query)
             if key is None:
                 assert value is None
             else:
-                k = self.proj_in_k(key)
-                v = self.proj_in_v(key)
+                k, v = self.proj_in_kv(key)
         else:
-            q = self.proj_in_q(query)
-            k = self.proj_in_q(key)
-            v = self.proj_in_q(value)
+            q = self.proj_in_query(query)
+            k = self.proj_in_key(key)
+            v = self.proj_in_value(value)
 
         q *= self.scaling
 
@@ -295,6 +320,8 @@ class MultiHeadAttention(link.Chain):
             functions.transpose(
                 attention, (1, 0) + tuple(range(2, attention.ndim))),
             (target_length, batch_size, embed_size))
+
+        attention = self.out_proj(attention, n_batch_axes=attention.ndim - 1)
 
         self.prev_attention_weights = attention_weights
         self.prev_attention_weights.unchain()
