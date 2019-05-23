@@ -3,12 +3,13 @@ import typing as tp  # NOQA
 import chainer
 from chainer.functions.activation import softmax
 from chainer.functions.array import concat
-from chainer.funcitons.array import expand_dims
+from chainer.functions.array import expand_dims
 from chainer.functions.array import split_axis
 from chainer.functions.array import repeat
 from chainer.functions.array import reshape
 from chainer.functions.array import transpose
 from chainer.functions.array import where
+from chainer.functions.math import average
 from chainer.functions.math import matmul
 from chainer.functions.noise import dropout as dropout_func
 from chainer.functions.connection import linear
@@ -45,7 +46,8 @@ def multihead_attention(
     dropout=0,  # type: float
     key_padding_mask=None,  # type: tp.Optional[InputType]
     attn_mask=None,  # type: tp.Optional[InputType]
-    scaling=None,  # typeL tp.Optional[float]
+    scaling=None,  # type: tp.Optional[float]
+    return_weights=True  # type: tp.Optional[bool]
 ):
     # type: (...) -> tp.Union[variable.Variable, tp.Tuple[variable.Variable, variable.Variable]]  # NOQA
     """Multi-head Attention forward function.
@@ -83,6 +85,7 @@ def multihead_attention(
             Mask help attention ignores certain positions.
             The shape is :math:`(L, L)` where :math:`L` is
             the target sequence length.
+        return_weights (bool): If ``True``, return averaged attention weights.
 
     Outputs:
         tuple of :class:`~chainer.Variable`\\ s.
@@ -105,12 +108,12 @@ def multihead_attention(
             b = proj_in_b[start:end]
         return linear.linear(x, W, b, n_batch_axes=x.ndim-1)
 
-    def _in_proj_qkv(query, W, b):
-        return split_axis.split_axis(_in_proj(query, W, b), 3, axis=-1)
+    def _in_proj_qkv(query):
+        return split_axis.split_axis(_in_proj(query), 3, axis=-1)
 
-    def _in_proj_kv(key, W, b, embedding_size):
+    def _in_proj_kv(key):
         return split_axis.split_axis(
-            _in_proj(key, W, b, embedding_size), 2, axis=-1)
+            _in_proj(key, embedding_size), 2, axis=-1)
 
     def _in_proj_q(query):
         return _in_proj(query, end=embedding_size, weight_idx=0)
@@ -135,7 +138,7 @@ def multihead_attention(
     if scaling is None:
         scaling = head_size ** -0.5
 
-    device = chainer.get_device(query)
+    device = chainer.backend.get_device_from_array(query)
     xp = device.xp
     dtype = query.dtype
 
@@ -198,9 +201,13 @@ def multihead_attention(
     if add_zero_attn:
         source_length += 1
         k = concat.concat((
-            k, generate_zeroed_array(device, (len(k), 1), dtype)))
+            k,
+            generate_zeroed_array(device, (len(k), 1) + k.shape[2:], dtype)
+        ))
         v = concat.concat((
-            v, generate_zeroed_array(device, (len(v), 1), dtype)))
+            v,
+            generate_zeroed_array(device, (len(v), 1) + v.shape[2:], dtype)
+        ))
         if attn_mask is not None:
             attn_mask = concat.cocnat((
                 attn_mask,
@@ -216,8 +223,7 @@ def multihead_attention(
                 )
             )
     attn_output_weights = matmul.matmul(
-        q, transpose.transpose(
-            k, (0,) + (2, 1) + tuple(range(2, k.ndim))))
+        q, transpose.transpose(k, (0, 2, 1)))
     if (attn_output_weights.shape !=
             (batch_size * n_head, target_length, source_length)):
         raise ValueError('`attn_output_weights` is shaped wrongly')
@@ -233,7 +239,7 @@ def multihead_attention(
         )
         attn_output_weights = where.where(
             expand_dims.expand_dims(
-                expand_dims.expand_dims(key_padding_mask, 1), 2) > 0,
+                expand_dims.expand_dims(key_padding_mask, 1), 2).array > 0,
             attn_output_weights,
             -xp.inf * generate_oned_array(
                 device, attn_output_weights.shape, dtype)
@@ -257,4 +263,13 @@ def multihead_attention(
     attn_output = linear.linear(
         attn_output, proj_out_W, proj_out_b,
         n_batch_axes=attn_output.ndim-1)
+
+    if return_weights:
+        attn_output_weights = reshape.reshape(
+            attn_output_weights,
+            (batch_size, n_head, target_length, source_length)
+        )
+        attn_output_weights = average.average(attn_output_weights, axis=1)
+    else:
+        attn_output_weights = None
     return attn_output, attn_output_weights

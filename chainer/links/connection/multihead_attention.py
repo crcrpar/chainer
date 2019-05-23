@@ -18,7 +18,7 @@ class MultiHeadAttention(link.Chain):
 
     Args:
         n_head (int): The number of heads.
-        embed_size (int):
+        embedding_size (int):
             The size of input query vectors
             and projected query, key, and value vectors.
         self_attention (bool): If ``True``, this becomes self-attention.
@@ -43,12 +43,13 @@ class MultiHeadAttention(link.Chain):
             If ``True``, no bias is added to projected key and value.
 
     See: `Attention Is All You Need<https://arxiv.org/abs/1706.03762>`_
+
     """
 
     def __init__(
         self,
         n_head,                 # type: int
-        embed_size,             # type: int
+        embedding_size,             # type: int
         self_attention=False,   # type: tp.Optional[bool]
         ksize=None,             # type: tp.Optional[int]
         vsize=None,             # type: tp.Optional[int]
@@ -63,20 +64,20 @@ class MultiHeadAttention(link.Chain):
         # type (...) -> None
         super().__init__()
 
-        if embed_size % n_head != 0:
+        if embedding_size % n_head != 0:
             raise ValueError(
-                '`embed_size` ({}) must be divisible by `n_head` ({})'.format(
-                    embed_size, n_head))
+                '`embedding_size` ({}) must be divisible by `n_head` ({})'.format(
+                    embedding_size, n_head))
         if not self_attention and (ksize is None or vsize is None):
             raise ValueError(
                 '`ksize` and `vsize` are required '
                 'if `self_attention` is `False`.')
         else:
-            ksize = embed_size
-            vsize = embed_size
+            ksize = embedding_size
+            vsize = embedding_size
         self.n_head = n_head
-        self.embed_size = embed_size  # == qsize
-        self.head_size = self.embed_size // self.n_head
+        self.embedding_size = embedding_size  # == qsize
+        self.head_size = self.embedding_size // self.n_head
         self._self_attention = self_attention
         if scaling is None:
             self.scaling = self.head_size ** -0.5
@@ -84,12 +85,12 @@ class MultiHeadAttention(link.Chain):
             self.scaling = scaling
 
         if self._self_attention:
-            ksize = self.embed_size
-            vsize = self.embed_size
+            ksize = self.embedding_size
+            vsize = self.embedding_size
         self.ksize = ksize
         self.vsize = vsize
         self.qkv_same_size = (
-            self.embed_size == self.ksize and self.embed_size == self.vsize)
+            self.embedding_size == self.ksize and self.embedding_size == self.vsize)
 
         self.attention_dropout = attention_dropout
         self.post_dropout = post_dropout
@@ -101,43 +102,43 @@ class MultiHeadAttention(link.Chain):
                 _initial_bias = initializers.Zero()
             if self.qkv_same_size:
                 self.proj_in_W = variable.Parameter(
-                    _initialW, (3 * self.embed_size, self.embed_size))  # type: variable.Variable  # NOQA
+                    _initialW, (3 * self.embedding_size, self.embedding_size))  # type: variable.Variable  # NOQA
             else:
                 self.proj_q_weight = variable.Parameter(
-                    _initialW, (self.embed_size, self.embed_size))  # type: variable.Variable  # NOQA
+                    _initialW, (self.embedding_size, self.embedding_size))  # type: variable.Variable  # NOQA
                 self.proj_k_weight = variable.Parameter(
-                    _initialW, (self.embed_size, self.ksize))  # type: variable.Variable  # NOQA
+                    _initialW, (self.embedding_size, self.ksize))  # type: variable.Variable  # NOQA
                 self.proj_v_weight = variable.Parameter(
-                    _initialW, (self.embed_size, self.vsize))  # type: variable.Variable  # NOQA
+                    _initialW, (self.embedding_size, self.vsize))  # type: variable.Variable  # NOQA
             if not nobias:
-                self.proj_in_bias = variable.Parameter(
-                    _initial_bias, (3 * self.embed_size,))  # type: variable.Variable  # NOQA
+                self.proj_in_b = variable.Parameter(
+                    _initial_bias, (3 * self.embedding_size,))  # type: variable.Variable  # NOQA
             else:
-                self.proj_in_bias = None
+                self.proj_in_b = None
 
             self.out_proj = links.Linear(
-                self.embed_size, self.embed_size,
+                self.embedding_size, self.embedding_size,
                 initialW=_initialW, initial_bias=_initial_bias, nobias=nobias)
             self.proj_out_W = self.out_proj.W
             self.proj_out_b = self.out_proj.b
 
             if not nobias_kv:
                 self.bias_k = variable.Parameter(
-                    _initial_bias, (self.embed_size,))  # type: variable.Variable  # NOQA
+                    _initial_bias, (self.embedding_size,))  # type: variable.Variable  # NOQA
                 self.bias_v = variable.Parameter(
-                    _initial_bias, (self.embed_size,))  # type: variable.Variable  # NOQA
+                    _initial_bias, (self.embedding_size,))  # type: variable.Variable  # NOQA
             else:
                 self.bias_k, self.bias_v = None, None
 
     def forward(
         self,
-        query,                    # type: tp.Optional[InputType]
-        key=None,                 # type: tp.Optional[InputType]
-        value=None,               # type: tp.Optional[InputType]
-        key_padding_mask=None,    # type: tp.Optional[InputType]
-        attention_mask=None,      # type: tp.Optional[InputType]
-        add_zero_attention=False, # type: tp.Optional[bool]
-        return_weights=False      # type: tp.Optional[bool]
+        query,                     # type: tp.Optional[InputType]
+        key=None,                  # type: tp.Optional[InputType]
+        value=None,                # type: tp.Optional[InputType]
+        key_padding_mask=None,     # type: tp.Optional[InputType]
+        attention_mask=None,       # type: tp.Optional[InputType]
+        add_zero_attention=False,  # type: tp.Optional[bool]
+        return_weights=False       # type: tp.Optional[bool]
     ):
         # type: (...) -> tp.Union[tp.Tuple[variable.Variable, variable.Variable], variable.Variable]  # NOQA
         """Compute attention weight and context vector.
@@ -181,12 +182,14 @@ class MultiHeadAttention(link.Chain):
             proj_in_W = (
                 self.proj_q_weight, self.proj_k_weight, self.proj_v_weight)
 
+        proj_in_b = self.proj_in_b
+
         attention, attention_weights = functions.multihead_attention(
-            self.n_head, self.ebedding_size, query, key, value,
-            proj_in_W, self.proj_in_b, self.bias_k, self.bias_v,
+            self.n_head, self.embedding_size, query, key, value,
+            proj_in_W, proj_in_b, self.bias_k, self.bias_v,
             self.proj_out_W, self.proj_out_b,
             add_zero_attention, self.attention_dropout,
-            key_padding_mask, attention_mask, self.scaling
+            key_padding_mask, attention_mask, self.scaling, return_weights
         )
         if return_weights:
             return attention, attention_weights
