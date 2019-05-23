@@ -20,12 +20,12 @@ from chainer import variable
 InputType = tp.Union[variable.Variable, types.NdArray]
 
 
-def generate_zeroed_array(device, shape, dtype):
+def generate_zeros(device, shape, dtype):
     with chainer.using_device(device):
         return device.xp.zeros(shape=shape, dtype=dtype)
 
 
-def generate_oned_array(device, shape, dtype):
+def generate_ones(device, shape, dtype):
     with chainer.using_device(device):
         return device.xp.ones(shape=shape, dtype=dtype)
 
@@ -97,10 +97,10 @@ def multihead_attention(
         target sequence length, and :math:`S` is the source sequence length.
     """
 
-    are_various_size = isinstance(proj_in_W, tuple)
+    are_different = isinstance(proj_in_W, tuple)
 
     def _in_proj(x, start=0, end=None, weight_idx=None):
-        if are_various_size:
+        if are_different:
             W = proj_in_W[weight_idx]
         else:
             W = proj_in_W[start:end, :]
@@ -164,7 +164,7 @@ def multihead_attention(
             attn_mask = concat.concat(
                 (
                     attn_mask,
-                    generate_zeroed_array(
+                    generate_zeros(
                         device, (len(attn_mask), 1), dtype)
                 )
             )
@@ -172,7 +172,7 @@ def multihead_attention(
             key_padding_mask = concat.concat(
                 (
                     key_padding_mask,
-                    generate_zeroed_array(
+                    generate_zeros(
                         device, (len(key_padding_mask), 1),
                         key_padding_mask.dtype
                     )
@@ -202,22 +202,22 @@ def multihead_attention(
         source_length += 1
         k = concat.concat((
             k,
-            generate_zeroed_array(device, (len(k), 1) + k.shape[2:], dtype)
+            generate_zeros(device, (len(k), 1) + k.shape[2:], dtype)
         ))
         v = concat.concat((
             v,
-            generate_zeroed_array(device, (len(v), 1) + v.shape[2:], dtype)
+            generate_zeros(device, (len(v), 1) + v.shape[2:], dtype)
         ))
         if attn_mask is not None:
             attn_mask = concat.cocnat((
                 attn_mask,
-                generate_zeroed_array(device, (len(attn_mask), 1), dtype)
+                generate_zeros(device, (len(attn_mask), 1), dtype)
             ))
         if key_padding_mask is not None:
             key_padding_mask = concat.concat(
                 (
                     key_padding_mask,
-                    generate_zeroed_array(
+                    generate_zeros(
                         device, (len(key_padding_mask), 1),
                         key_padding_mask.dtype)
                 )
@@ -237,12 +237,13 @@ def multihead_attention(
             attn_output_weights,
             (batch_size, n_head, target_length, source_length)
         )
+        expanded_mask = expand_dims.expand_dims(
+            expand_dims.expand_dims(key_padding_mask, 1), 2)
         attn_output_weights = where.where(
-            expand_dims.expand_dims(
-                expand_dims.expand_dims(key_padding_mask, 1), 2).array > 0,
-            attn_output_weights,
-            -xp.inf * generate_oned_array(
-                device, attn_output_weights.shape, dtype)
+            expanded_mask,
+            -xp.inf * generate_ones(
+                device, attn_output_weights.shape, dtype),
+            attn_output_weights
         )
         attn_output_weights = reshape.reshape(
             attn_output_weights,
