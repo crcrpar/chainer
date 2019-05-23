@@ -31,7 +31,7 @@ class MultiHeadAttention(link.Chain):
         post_dropout (float):
             The dropout ratio applied to attention after softmax.
         scaling (float):
-            The scaler value that defaults to :math:`1/\sqrt(n_{head})`.
+            The scaler value that defaults to :math:`1/\\sqrt(n_{head})`.
         initialW (:ref:`initializer <initializer>`): Initializer to initialize
             the weight.
         initial_bias (:ref:`initializer <initializer>`): Initializer to
@@ -42,7 +42,7 @@ class MultiHeadAttention(link.Chain):
         nobias_kv (bool):
             If ``True``, no bias is added to projected key and value.
 
-    See: `Attention Is All You Need<https://arxiv.org/abs/1706.03762>`_
+    See: `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_
 
     """
 
@@ -66,8 +66,8 @@ class MultiHeadAttention(link.Chain):
 
         if embedding_size % n_head != 0:
             raise ValueError(
-                '`embedding_size` ({}) must be divisible by `n_head` ({})'.format(
-                    embedding_size, n_head))
+                '`embedding_size` ({}) must be '.format(embedding_size) +
+                'divisible by `n_head` ({})'.format(n_head))
         if not self_attention and (ksize is None or vsize is None):
             raise ValueError(
                 '`ksize` and `vsize` are required '
@@ -90,7 +90,9 @@ class MultiHeadAttention(link.Chain):
         self.ksize = ksize
         self.vsize = vsize
         self.qkv_same_size = (
-            self.embedding_size == self.ksize and self.embedding_size == self.vsize)
+            self.embedding_size == self.ksize
+            and self.embedding_size == self.vsize
+        )
 
         self.attention_dropout = attention_dropout
         self.post_dropout = post_dropout
@@ -168,7 +170,7 @@ class MultiHeadAttention(link.Chain):
             return_weights (bool):
                 If ``True``, return both attention and attention weights.
         Returns:
-            tuple of :class:`~chainer.Variable`\\s
+            tuple of :class:`~chainer.Variable`\\ s:
                 if `return_weights` is ``True``.
                 Otherwise, :class:`~chainer.Variable`.
                 The first element is context vector shaped :math:`(L, B, E)`
@@ -188,7 +190,7 @@ class MultiHeadAttention(link.Chain):
             self.n_head, self.embedding_size, query, key, value,
             proj_in_W, proj_in_b, self.bias_k, self.bias_v,
             self.proj_out_W, self.proj_out_b,
-            add_zero_attention, self.attention_dropout,
+            add_zero_attention, self.attention_dropout, self.post_dropout,
             key_padding_mask, attention_mask, self.scaling, return_weights
         )
         if return_weights:
