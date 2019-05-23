@@ -9,6 +9,7 @@ from chainer import functions
 from chainer import links
 from chainer import testing
 
+
 def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=False, src_lengths=None):
     """ Numpy-based reference implementation of scaled dot attention
     for testing"""
@@ -36,7 +37,7 @@ def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=False, src_lengths=None):
 def _batchmatmul(a, b):  # batchmatmul over 4 dim matrix
     """ Numpy-based batch matrix multiply over 4 dim matrix"""
     with chainer.using_config('use_cuda', False), \
-        chainer.no_backprop_mode():
+            chainer.no_backprop_mode():
         retval = functions.matmul(a, b).array
     return retval
 
@@ -54,7 +55,8 @@ def _softmax(x):  # softmax over 4 dim matrix
 
 
 def _generate_src_lengths(batch_size, seq_len):
-    src_lengths = numpy.array([random.randint(1, seq_len) for i in range(batch_size)])
+    src_lengths = numpy.array([random.randint(1, seq_len)
+                               for i in range(batch_size)])
 
     # max source length has to equal seq_len, so randomly choose
     # one example to have source length = seq_len
@@ -68,7 +70,8 @@ def _generate_src_lengths(batch_size, seq_len):
 def _split_heads_ref(X, dims, nheads, d_head):
     X_split = numpy.reshape(X, dims[:2] + [nheads, d_head])
     X_split_transposed = numpy.transpose(X_split, [0, 2, 1, 3])
-    reference = numpy.reshape(X_split_transposed, [dims[0], nheads, dims[1], d_head])
+    reference = numpy.reshape(
+        X_split_transposed, [dims[0], nheads, dims[1], d_head])
     return reference
 
 
@@ -103,7 +106,8 @@ def _create_src_lengths_mask(batch_size, src_lengths):
         [batch_size, max_src_len]
     """
     max_srclen = src_lengths.max()
-    src_indices = numpy.arange(max_srclen)[None, Ellipsis].astype(src_lengths.dtype)
+    src_indices = numpy.arange(max_srclen)[
+        None, Ellipsis].astype(src_lengths.dtype)
     src_indices = numpy.broadcast_to(src_indices, (batch_size, max_srclen))
     src_lengths = numpy.broadcast_to(
         numpy.expand_dims(src_lengths, 1), (batch_size, max_srclen))
@@ -112,7 +116,7 @@ def _create_src_lengths_mask(batch_size, src_lengths):
 
 
 class TestMultiheadAttention(unittest.TestCase):
-    # ref: https://github.com/pytorch/pytorch/blob/163f0e182c7e092d6b61600e3a5e20347abab848/test/test_nn.py#L3240
+    # ref: https://github.com/pytorch/pytorch/blob/163f0e182c7e092d6b61600e3a5e20347abab848/test/test_nn.py#L3240  # NOQA
 
     def check_multihead_attention(self, use_src_lengths):
         for _ in range(100):
@@ -129,7 +133,8 @@ class TestMultiheadAttention(unittest.TestCase):
                     batch_size=batch_sz, seq_len=seq_len
                 )
 
-            decoder_state = numpy.random.rand(batch_sz, d_model).astype(numpy.float32)
+            decoder_state = numpy.random.rand(
+                batch_sz, d_model).astype(numpy.float32)
             K = numpy.random.rand(*dims).astype(numpy.float32)
             V = K
             Q = numpy.expand_dims(decoder_state, 1)
@@ -163,9 +168,11 @@ class TestMultiheadAttention(unittest.TestCase):
 
             Q_fc = _fc(Q, "/proj_in_", multihead_attn_module, end=d_model)
             K_fc = _fc(
-                K, "/proj_in_", multihead_attn_module, start=d_model, end=2 * d_model
+                K, "/proj_in_", multihead_attn_module,
+                start=d_model, end=2 * d_model
             )
-            V_fc = _fc(V, "/proj_in_", multihead_attn_module, start=2 * d_model)
+            V_fc = _fc(V, "/proj_in_", multihead_attn_module,
+                       start=2 * d_model)
 
             Q_split = _split_heads_ref(
                 Q_fc, [batch_sz, 1, d_model], nheads, d_head
