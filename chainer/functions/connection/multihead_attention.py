@@ -11,7 +11,7 @@ from chainer.functions.array import transpose
 from chainer.functions.array import where
 from chainer.functions.math import average
 from chainer.functions.math import matmul
-from chainer.functions.noise import dropout as dropout_func
+from chainer.functions.noise import dropout
 from chainer.functions.connection import linear
 from chainer import types  # NOQA
 from chainer import variable
@@ -43,14 +43,14 @@ def multihead_attention(
     proj_out_W=None,  # type: variable.Variable
     proj_out_b=None,  # type: variable.Variable
     add_zero_attn=False,  # type: bool
-    dropout=0,  # type: float
+    attention_dropout=0,  # type: float
     post_dropout=0,  # type: float
     key_padding_mask=None,  # type: tp.Optional[InputType]
     attn_mask=None,  # type: tp.Optional[InputType]
     scaling=None,  # type: tp.Optional[float]
     return_weights=True  # type: tp.Optional[bool]
 ):
-    # type: (...) -> tp.Union[variable.Variable, tp.Tuple[variable.Variable, variable.Variable]]  # NOQA
+    # type: (...) -> tp.Tuple[variable.Variable, variable.Variable]  # NOQA
     """Multi-head Attention forward function.
 
     Args:
@@ -68,18 +68,20 @@ def multihead_attention(
             batch size, and :math:`E` is the embedding size.
         expected_embedding_size (int): Total number of units of the model.
         n_head (int): The number of parallel attention heads.
-        proj_in_W (tuple of :class:`~chainer.Variable`\\s, :class:`~chainer.Variable` or :ref:`ndarray`):
+        proj_in_W (:obj:`tuple`, :class:`~chainer.Variable` or :ref:`ndarray`):
             Weight(s) to project `query`, `key`, and `value` vectors.
             If the input sizes of `query`, `key`, and `value` are different,
-            this should be the tuple of 3 weights, otherwise, 1 weight.
+            this should be the tuple of three weights, otherwise, one weight.
         proj_in_b (:class:`~chainer.Variable` or :ref:`ndarray`):
             Bias added to projected `query`, `key`, and `value` vectors.
         add_zero_attn (bool): If ``True``, add a new batch of zeros to
             the key and value sequences at axis=1.
-        dropout (float): Dropout ratio at the attention layer.
+        attention_dropout (float): Dropout ratio at the attention layer.
         post_dropout (float): Dropout ratio at the output.
-        proj_out_W (:class:`~chainer.Variable` or :ref:`ndarray`)
-        proj_out_b (:class:`~chainer.Variable` or :ref:`ndarray`)
+        proj_out_W (:class:`~chainer.Variable` or :ref:`ndarray`):
+            Weight to project attention.
+        proj_out_b (:class:`~chainer.Variable` or :ref:`ndarray`):
+            Bias for projected attention.
         key_padding_mask (:class:`~chainer.Variable` or :ref:`ndarray`):
             If not ``None``, specified padding elements in the key
             will be ignored by the attention.
@@ -91,14 +93,18 @@ def multihead_attention(
             the target sequence length.
         return_weights (bool): If ``True``, return averaged attention weights.
 
-    Outputs:
-        ~tuple of :class:`~chainer.Variable`\\ s:
-        The first element is the output of attention with the shape of
-        :math:`(L, B, E)` where :math:`L` is the target sequence length,
-        :math:`B` is the batch size, and :math:`E` is the embedding size.
-        - The second element is the weights of the attention with the shape of
-        :math:`(B, L, S)` where :math:`B` is the batch size, :math:`L` is the
-        target sequence length, and :math:`S` is the source sequence length.
+    Returns:
+        tuple: This function returns a tuple containing ``attn_output`` and
+        ``attn_output_weights``.
+
+        - ``attn_output`` is the output of attention whose shape is
+          :math:`(L, B, E)` where :math:`L` is the target sequence length,
+          :math:`B` is the batch size, and :math:`E` is the embedding size.
+        - ``attn_output_weights`` is the weights of attention whose shape is
+          :math:`(B, L, S)` where :math:`B` is the batch size,
+          :math:`L` is the target sequence length,
+          and :math:`S` is the source sequence length. If ``return_weights`` is
+          ``False``, this return value is ``None``.
 
     .. seealso:: :class:`~chainer.links.MultiHeadAttention`
 
@@ -258,9 +264,9 @@ def multihead_attention(
         )
 
     attn_output_weights = softmax.softmax(attn_output_weights, axis=-1)
-    if dropout > 0.0:
-        attn_output_weights = dropout_func.dropout(
-            attn_output_weights, dropout)
+    if attention_dropout > 0.0:
+        attn_output_weights = dropout.dropout(
+            attn_output_weights, attention_dropout)
 
     attn_output = matmul.matmul(attn_output_weights, v)
     attn_output = transpose.transpose(
@@ -273,7 +279,7 @@ def multihead_attention(
         attn_output, proj_out_W, proj_out_b,
         n_batch_axes=attn_output.ndim-1)
     if post_dropout > 0.0:
-        attn_output = dropout_func.dropout(attn_output, post_dropout)
+        attn_output = dropout.dropout(attn_output, post_dropout)
 
     if return_weights:
         attn_output_weights = reshape.reshape(

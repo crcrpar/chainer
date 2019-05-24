@@ -31,7 +31,7 @@ class MultiHeadAttention(link.Chain):
         post_dropout (float):
             The dropout ratio applied to attention after softmax.
         scaling (float):
-            The scaler value that defaults to :math:`1/\\sqrt(n_{head})`.
+            The scaler value that defaults to :math:`1/\\sqrt{n_{head}}`.
         initialW (:ref:`initializer <initializer>`): Initializer to initialize
             the weight.
         initial_bias (:ref:`initializer <initializer>`): Initializer to
@@ -134,7 +134,7 @@ class MultiHeadAttention(link.Chain):
 
     def forward(
         self,
-        query,                     # type: tp.Optional[InputType]
+        query,                     # type: InputType
         key=None,                  # type: tp.Optional[InputType]
         value=None,                # type: tp.Optional[InputType]
         key_padding_mask=None,     # type: tp.Optional[InputType]
@@ -144,6 +144,10 @@ class MultiHeadAttention(link.Chain):
     ):
         # type: (...) -> tp.Union[tp.Tuple[variable.Variable, variable.Variable], variable.Variable]  # NOQA
         """Compute attention weight and context vector.
+
+        This computes and returns ``attention``. If ``return_weights`` is
+        ``True``, the return value is a :obj:`tuple` of ``attention`` and
+        ``attention_weights``
 
         Self-attention can be implemented by passing the same arguments for
         query, key, and value. Timesteps can be masked by
@@ -164,19 +168,33 @@ class MultiHeadAttention(link.Chain):
             key_padding_mask (:class:`~chainer.Variable` or :ref:`ndarray`):
                 If not ``None``, mask the memory slots.
                 The shape is (batch_size, source_length).
-                Each value is 0 or 1 where 1 means that
+                Each value is 0 (``False``) or 1 (``True``) where 1 means that
                 the memory slot will not be used.
-            attention_mask (:class:`~chainer.Variable` or :ref:`ndarray`)
-            return_weights (bool):
-                If ``True``, return both attention and attention weights.
+            attention_mask (:class:`~chainer.Variable` or :ref:`ndarray`):
+                Mask help attention ignores certain positions.
+                The shape is :math:`(L, L)` where :math:`L` is
+                the target sequence length.
+            return_weights (bool): If ``True``, return both ``attention``
+                and ``attention_weights``. The default value is ``False``.
+
         Returns:
-            tuple of :class:`~chainer.Variable`\\ s:
-                if `return_weights` is ``True``.
-                Otherwise, :class:`~chainer.Variable`.
-                The first element is context vector shaped :math:`(L, B, E)`
-                the second is attention weights shaped :math:`(B, L, S)`.
+            :class:`~chainer.Variable` or
+            :obj:`tuple` of :class:`~chainer.Variable`\\ s: This returns tuple
+            of ``attention`` and ``attention_weights`` when ``return_weight``
+            is ``True``.
+
+            - ``attn_output`` is the output of attention whose shape is
+              :math:`(L, B, E)` where :math:`L` is the target sequence length,
+              :math:`B` is the batch size, and :math:`E` is the embedding size.
+
+            - ``attn_output_weights`` is the weights of attention whose shape
+              is :math:`(B, L, S)` where :math:`B` is the batch size,
+              :math:`L` is the target sequence length,
+              and :math:`S` is the source sequence length.
+
+        .. seealso:: :func:`~chainer.functions.multihead_attention`
+
         """
-        # TODO (crcrpar): Support cuDNN MultiHeadAttn when CuPy supports it.
 
         if hasattr(self, 'proj_in_W'):
             proj_in_W = self.proj_in_W
@@ -184,11 +202,9 @@ class MultiHeadAttention(link.Chain):
             proj_in_W = (
                 self.proj_q_weight, self.proj_k_weight, self.proj_v_weight)
 
-        proj_in_b = self.proj_in_b
-
         attention, attention_weights = functions.multihead_attention(
             self.n_head, self.embedding_size, query, key, value,
-            proj_in_W, proj_in_b, self.bias_k, self.bias_v,
+            proj_in_W, self.proj_in_b, self.bias_k, self.bias_v,
             self.proj_out_W, self.proj_out_b,
             add_zero_attention, self.attention_dropout, self.post_dropout,
             key_padding_mask, attention_mask, self.scaling, return_weights
