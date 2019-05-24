@@ -30,8 +30,10 @@ class MultiHeadAttention(link.Chain):
             The dropout ratio applied to attention before softmax.
         post_dropout (float):
             The dropout ratio applied to attention after softmax.
-        scaling (float):
-            The scaler value that defaults to :math:`1/\\sqrt{n_{head}}`.
+        scaler (float): The scaler value that defaults to
+            :math:`1/\\sqrt{n_{head}}`.
+        softmax_scaler (float): Softmax smoothing, or sharpening, coefficient.
+            The default value is 1.0.
         initialW (:ref:`initializer <initializer>`): Initializer to initialize
             the weight.
         initial_bias (:ref:`initializer <initializer>`): Initializer to
@@ -49,13 +51,14 @@ class MultiHeadAttention(link.Chain):
     def __init__(
         self,
         n_head,                 # type: int
-        embedding_size,             # type: int
+        embedding_size,         # type: int
         self_attention=False,   # type: tp.Optional[bool]
         ksize=None,             # type: tp.Optional[int]
         vsize=None,             # type: tp.Optional[int]
         attention_dropout=0.0,  # type: tp.Optional[float]
         post_dropout=0.0,       # type: tp.Optional[float]
-        scaling=None,           # type: tp.Optional[float]
+        scaler=None,            # type: tp.Optional[float]
+        softmax_scaler=None,    # type: tp.Optional[float]
         initialW=None,          # type: tp.Optional[types.InitializerSpec]
         initial_bias=None,      # type: tp.Optional[types.InitializerSpec]
         nobias=False,           # type: tp.Optional[bool]
@@ -79,10 +82,8 @@ class MultiHeadAttention(link.Chain):
         self.embedding_size = embedding_size  # == qsize
         self.head_size = self.embedding_size // self.n_head
         self._self_attention = self_attention
-        if scaling is None:
-            self.scaling = self.head_size ** -0.5
-        else:
-            self.scaling = scaling
+        self.scaler = scaler
+        self.softmax_scaler = softmax_scaler
 
         if self._self_attention:
             ksize = self.embedding_size
@@ -207,7 +208,8 @@ class MultiHeadAttention(link.Chain):
             proj_in_W, self.proj_in_b, self.bias_k, self.bias_v,
             self.proj_out_W, self.proj_out_b,
             add_zero_attention, self.attention_dropout, self.post_dropout,
-            key_padding_mask, attention_mask, self.scaling, return_weights
+            key_padding_mask, attention_mask, self.scaler, self.softmax_scaler,
+            return_weights
         )
         if return_weights:
             return attention, attention_weights

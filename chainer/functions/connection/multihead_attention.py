@@ -47,7 +47,8 @@ def multihead_attention(
     post_dropout=0,  # type: float
     key_padding_mask=None,  # type: tp.Optional[InputType]
     attn_mask=None,  # type: tp.Optional[InputType]
-    scaling=None,  # type: tp.Optional[float]
+    dot_product_scaler=None,  # type: tp.Optional[float]
+    softmax_scaler=1.0,  # type: tp.Optional[float]
     return_weights=True  # type: tp.Optional[bool]
 ):
     # type: (...) -> tp.Tuple[variable.Variable, variable.Variable]  # NOQA
@@ -91,6 +92,10 @@ def multihead_attention(
             Mask help attention ignores certain positions.
             The shape is :math:`(L, L)` where :math:`L` is
             the target sequence length.
+        dot_product_scaler: (float): Scaler for dot product. If ``None``,
+            :math:`1 / \\sqrt{embedding_size / n_head}` is used.
+        softmax_scaler (float): Softmax smoothing, or sharpening, coefficient.
+            This value is for cuDNN implementation.
         return_weights (bool): If ``True``, return averaged attention weights.
 
     Returns:
@@ -148,8 +153,8 @@ def multihead_attention(
     kv_same = key is value
     target_length, batch_size, embedding_size = query.shape
     head_size = embedding_size // n_head
-    if scaling is None:
-        scaling = head_size ** -0.5
+    if dot_product_scaler is None:
+        dot_product_scaler = head_size ** -0.5
 
     device = chainer.backend.get_device_from_array(query)
     xp = device.xp
@@ -168,7 +173,7 @@ def multihead_attention(
         q = _in_proj_q(query)
         k = _in_proj_k(key)
         v = _in_proj_v(value)
-    q *= scaling
+    q *= dot_product_scaler
 
     if bias_k is not None:
         k = concat.concat((k, repeat.repeat(bias_k, batch_size, axis=1)))
