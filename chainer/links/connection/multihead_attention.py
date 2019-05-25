@@ -1,11 +1,11 @@
-import typing as tp  # NOQA
+import typing as tp
 
 
 from chainer import functions
 from chainer import initializers
 from chainer import link
 from chainer import links
-from chainer import types  # NOQA
+from chainer import types
 from chainer import variable
 
 
@@ -52,17 +52,17 @@ class MultiHeadAttention(link.Chain):
         self,
         n_head,                 # type: int
         embedding_size,         # type: int
-        self_attention=False,   # type: tp.Optional[bool]
+        self_attention=False,   # type: bool
         ksize=None,             # type: tp.Optional[int]
         vsize=None,             # type: tp.Optional[int]
-        attention_dropout=0.0,  # type: tp.Optional[float]
-        post_dropout=0.0,       # type: tp.Optional[float]
+        attention_dropout=0.0,  # type: float
+        post_dropout=0.0,       # type: float
         scaler=None,            # type: tp.Optional[float]
         softmax_scaler=None,    # type: tp.Optional[float]
         initialW=None,          # type: tp.Optional[types.InitializerSpec]
         initial_bias=None,      # type: tp.Optional[types.InitializerSpec]
-        nobias=False,           # type: tp.Optional[bool]
-        nobias_kv=True          # type: tp.Optional[bool]
+        nobias=False,           # type: bool
+        nobias_kv=True          # type: bool
     ):
         # type (...) -> None
         super().__init__()
@@ -140,8 +140,8 @@ class MultiHeadAttention(link.Chain):
         value=None,                # type: tp.Optional[InputType]
         key_padding_mask=None,     # type: tp.Optional[InputType]
         attention_mask=None,       # type: tp.Optional[InputType]
-        add_zero_attention=False,  # type: tp.Optional[bool]
-        return_weights=False       # type: tp.Optional[bool]
+        add_zero_attention=False,  # type: bool
+        return_weights=False       # type: bool
     ):
         # type: (...) -> tp.Union[tp.Tuple[variable.Variable, variable.Variable], variable.Variable]  # NOQA
         """Compute attention weight and context vector.

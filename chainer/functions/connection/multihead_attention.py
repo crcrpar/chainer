@@ -13,7 +13,7 @@ from chainer.functions.math import average
 from chainer.functions.math import matmul
 from chainer.functions.noise import dropout
 from chainer.functions.connection import linear
-from chainer import types  # NOQA
+from chainer import types
 from chainer import variable
 
 
@@ -31,25 +31,25 @@ def generate_ones(device, shape, dtype):
 
 
 def multihead_attention(
-    n_head,  # type: int
-    embedding_size,  # type: int
-    query,  # type: InputType
-    key,  # type: InputType
-    value,  # type: InputType
-    proj_in_W,  # type: tp.Union[variable.Variable, tp.Tuple[variable.Variable, variable.Variable, variable.Variable]]  # NOQA
-    proj_in_b=None,  # type: variable.Variable
-    bias_k=None,  # type: variable.Variable
-    bias_v=None,  # type: variable.Variable
-    proj_out_W=None,  # type: variable.Variable
-    proj_out_b=None,  # type: variable.Variable
-    add_zero_attn=False,  # type: bool
-    attention_dropout=0,  # type: float
-    post_dropout=0,  # type: float
-    key_padding_mask=None,  # type: tp.Optional[InputType]
-    attn_mask=None,  # type: tp.Optional[InputType]
+    n_head,                   # type: int
+    embedding_size,           # type: int
+    query,                    # type: InputType
+    key,                      # type: InputType
+    value,                    # type: InputType
+    proj_in_W,                # type: tp.Union[variable.Variable, tp.Tuple[variable.Variable, variable.Variable, variable.Variable]]  # NOQA
+    proj_in_b,                # type: tp.Optional[variable.Variable]
+    bias_k,                   # type: variable.Variable
+    bias_v,                   # type: variable.Variable
+    proj_out_W,               # type: variable.Variable
+    proj_out_b,               # type: variable.Variable
+    add_zero_attn=False,      # type: bool
+    attention_dropout=0,      # type: float
+    post_dropout=0,           # type: float
+    key_padding_mask=None,    # type: tp.Optional[InputType]
+    attn_mask=None,           # type: tp.Optional[InputType]
     dot_product_scaler=None,  # type: tp.Optional[float]
-    softmax_scaler=1.0,  # type: tp.Optional[float]
-    return_weights=True  # type: tp.Optional[bool]
+    softmax_scaler=1.0,       # type: float
+    return_weights=True       # type: bool
 ):
     # type: (...) -> tp.Tuple[variable.Variable, variable.Variable]  # NOQA
     """Multi-head Attention forward function.
