@@ -17,11 +17,12 @@ class Dropout(function_node.FunctionNode):
     """Dropout regularization."""
     _use_cudnn = False
 
-    def __init__(self, dropout_ratio, mask=None):
+    def __init__(self, dropout_ratio, mask=None, return_mask=False):
         if not 0.0 <= dropout_ratio < 1.0:
             raise ValueError('dropout_ratio must be in the range [0, 1)')
         self.dropout_ratio = dropout_ratio
         self.mask = mask
+        self.return_mask = return_mask
 
     def check_type_forward(self, in_types):
         type_check._argname(in_types, ('x',))
@@ -30,7 +31,8 @@ class Dropout(function_node.FunctionNode):
     def forward_cpu(self, x):
         if (intel64.should_use_ideep('>=auto')
                 and intel64.inputs_all_ready(x)
-                and self.mask is None):
+                and self.mask is None
+                and not self.return_mask):
             return self._forward_ideep(x)
 
         if self.mask is not None:
@@ -199,7 +201,7 @@ def dropout(x, ratio=.5, **kwargs):
                   'Use chainer.using_config')
 
     if configuration.config.train:
-        func = Dropout(ratio, mask)
+        func = Dropout(ratio, mask, return_mask)
         out, = func.apply((x,))
         mask = func.mask
     else:
