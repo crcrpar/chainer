@@ -465,7 +465,7 @@ class Link(device_resident.DeviceResident):
         # So, we need a hook that handles lazy initialization for generality or tweak BatchNormalization.
         for name in self._persistent:
             persistent = d[name]
-            d[persistent] = persistent.astype(dtype)
+            d[name] = persistent.astype(dtype)
 
     def params(self, include_uninit=True):
         # type: (bool) -> tp.Iterator[chainer.Parameter]
