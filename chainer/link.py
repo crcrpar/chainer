@@ -155,7 +155,8 @@ class Link(device_resident.DeviceResident):
 
         # This flag has to be set before calling add_param().
         self.__init_done = True
-        self.map_mixed16 = None
+        self._param_map_mixed16 = None
+        self._persistent_map_mixed16 = None
 
         for name, value in six.iteritems(params):
             shape, dtype = _ensure_shape_dtype(value)
@@ -456,16 +457,25 @@ class Link(device_resident.DeviceResident):
                 d[name] = visitor.visit_array(x)
 
     def cast(self, dtype):
-        dtype = chainer.get_dtype(dtype, map_mixed16=self.map_mixed16)
+        # type: (types.DTypeSpec) -> None
+        """Cast parameters and persistents to given dtype.
+
+        Args:
+            dtype (types.DTypeSpec)
+        """
         d = self.__dict__
+        param_dtype = chainer.get_dtype(
+            dtype, map_mixed16=self._param_map_mixed16)
         for name in self._params:
-            parameter = d[name]
-            parameter.dtype = dtype
-        # persistents cannot exist in the first `__call__` if parameters are initialized lazily.
-        # So, we need a hook that handles lazy initialization for generality or tweak BatchNormalization.
+            param = d[name]
+            d[name].array = param.array.astype(param_dtype)
+        persistent_dtype = chainer.get_dtype(
+            dtype, map_mixed16=self._persistent_map_mixed16)
         for name in self._persistent:
+            # TODO(crcrpar): Replace ndarray with concrete classes.
             persistent = d[name]
-            d[name] = persistent.astype(dtype)
+            if hasattr(persistent, 'astype'):
+                d[name] = persistent.astype(persistent_dtype)
 
     def params(self, include_uninit=True):
         # type: (bool) -> tp.Iterator[chainer.Parameter]
