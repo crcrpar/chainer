@@ -107,6 +107,7 @@ from chainer.functions.loss.ctc import connectionist_temporal_classification  # 
 from chainer.functions.loss.decov import decov  # NOQA
 from chainer.functions.loss.discriminative_loss import discriminative_margin_based_clustering_loss  # NOQA
 from chainer.functions.loss.hinge import hinge  # NOQA
+from chainer.functions.loss.hinge_max_margin import hinge_max_margin  # NOQA
 from chainer.functions.loss.huber_loss import huber_loss  # NOQA
 from chainer.functions.loss.mean_absolute_error import mean_absolute_error  # NOQA
 from chainer.functions.loss.mean_squared_error import mean_squared_error  # NOQA
