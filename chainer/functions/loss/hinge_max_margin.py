@@ -110,33 +110,35 @@ class HingeMaxMargin(function_node.FunctionNode):
 def hinge_max_margin(x, t, norm="L2", reduce="mean"):
     """Computes the hinge loss for a one vs max classification task.
 
-        .. math::
-            margin_{i} = ReLu \\left ( 1-x_{i,t_{i}}+max_{k,k\\neq t_{i}}
-             \\left ( x_{i,k} \\right )\\right )
+    .. math::
+        margin_{i} = ReLU \\left(1 - x_{i,t_{i}} + max_{k, k \\neq t_{i}}
+         \\left(x_{i, k} \\right) \\right)
 
-        and
+    and
 
-        .. math::
-            loss_{i} = \\left \\{ \\begin{array}{cc}
-            margin_{i} & {\\rm if~norm} = {\\rm L1} \\\\
-            margin_{i}^{2} & {\\rm if~norm} = {\\rm L2} \\\\
-            margin_{i}-1 & \\rm if~norm} = {\\rm Huber \\& margin_{i}
-             \\geqslant 2} \\\\
-            margin_{i}^{2} & {\\rm if~norm} = {\\rm Huber \\& margin_{i}<2}
+    .. math::
+        loss_{i} = \\left \\{
+         \\begin{array}{cc}
+         margin_{i}     & {\\rm if~norm} = {\\rm L1} \\\\
+         margin_{i}^{2} & {\\rm if~norm} = {\\rm L2} \\\\
+         margin_{i}-1   & {\\rm if~norm} =
+         {\\rm Huber \\& margin_{i} \\ge 2} \\\\
+         margin_{i}^{2} & {\\rm if~norm} ={\\rm Huber \\& margin_{i} < 2}
+         \\end{array} \\right \\}
 
-            \\end{array} \\right.
+    All 3 norms are continuous. ``'L2'`` and ``'Huber'`` are differentiable,
+    ``'L1'`` is not.
 
-        All 3 norms are continuous.
-        ``'L2'`` and ``'Huber'`` are differentiable, ``'L1'`` is not.
+    The output is a variable whose value depends on the value of
+    the option ``reduce``. If it is ``'no'``,
+    it holds the loss values for each example. If it is ``'mean'``,
+    it takes the mean of loss values.
 
-        The output is a variable whose value depends on the value of
-        the option ``reduce``. If it is ``'along_second_axis'``,
-         it holds the loss values for each example. If it is ``'mean'``,
-          it takes the mean of loss values.
-
-        See: `Huber loss- Wikipedia <https://en.wikipedia.org/wiki/Huber_loss>`
-        and Structured support vector machine- Wikipedia
-        <https://en.wikipedia.org/wiki/Structured_support_vector_machine>'
+    See:
+        - `Huber loss - Wikipedia
+          <https://en.wikipedia.org/wiki/Huber_loss>`_
+        - `Structured support vector machine - Wikipedia \
+<https://en.wikipedia.org/wiki/Structured_support_vector_machine>`_
 
     Args:
         x (:class:`~chainer.Variable` or :ref:`ndarray`): Input variable.
@@ -145,7 +147,7 @@ def hinge_max_margin(x, t, norm="L2", reduce="mean"):
             :math:`N`-dimensional label vector with values
             :math:`t_n \\in \\{0, 1, 2, \\dots, K-1\\}`.
             The shape of ``t`` should be (:math:`N`,).
-        norm (string): Specifies norm type. Either ``'L1'`` , ``'L2'`` ,
+        norm (str): Specifies norm type. Either ``'L1'`` , ``'L2'`` ,
             ``'Huber'`` are acceptable.
         reduce (str): Reduction option. Its value must be either
             ``'mean'`` or ``'no'``. The default value is ``'mean'``.
@@ -153,18 +155,18 @@ def hinge_max_margin(x, t, norm="L2", reduce="mean"):
     Returns:
         ~chainer.Variable:
             A variable object holding the hinge max margin loss.
-            If ``reduce`` is ``'along_second_axis'``, the output variable holds
+            If ``reduce`` is ``'no'``, the output variable holds
             an array whose shape is same :math:`N`.
             If it is ``'mean'``, the output variable holds a scalar value.
 
     .. admonition:: Example
 
-        In this case, the batch size ``N`` is 4 and the number of classes ``K``
-        is 2.
+        >>> # the batchsize is 4 and the number of classes is 2.
         >>> import numpy as np
+        >>> import chainer.functions as F
         >>> x = np.stack(
         ...     (np.arange(10), 5 * np.ones(10)), 1).astype(np.float32)
-        >>> t = np.ones((10,),np.int32)
+        >>> t = np.ones((10,), np.int32)
         >>> F.hinge_max_margin(x, t, norm='L1', reduce='no')
         variable([0., 0., 0., 0., 0., 1., 2., 3., 4., 5.])
         >>> F.hinge_max_margin(x, t)

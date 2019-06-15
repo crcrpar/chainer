@@ -189,6 +189,7 @@ Loss functions
    chainer.functions.gaussian_kl_divergence
    chainer.functions.gaussian_nll
    chainer.functions.hinge
+   chainer.functions.hinge_max_margin
    chainer.functions.huber_loss
    chainer.functions.mean_absolute_error
    chainer.functions.mean_squared_error
