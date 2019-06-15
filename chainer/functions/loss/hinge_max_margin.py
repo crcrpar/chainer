@@ -1,28 +1,56 @@
 import numpy
 
-from chainer import functions as F
-from chainer.backends import cuda
-from chainer.function_node import FunctionNode
+from chainer import backend
+from chainer.functions.array import expand_dims
+from chainer.functions.math import minimum
+from chainer.functions.math import sign
+from chainer import function_node
+from chainer import utils
 from chainer.utils import type_check
 
 
-class HingeMaxMargin(FunctionNode):
+def _forward_generic(x, t, norm, reduce):
+    xp = backend.get_array_module(x)
+    mask = xp.zeros_like(x)
+    mask[:, t] = -1
+    tmp = xp.copy(x)
+    tmp[:, t] = numpy.finfo(x.dtype).min
+    mask[:, xp.argmax(tmp, 1)] = 1
+    margin = xp.maximum(0, 1 + xp.sum(mask * x, 1))
+
+    if norm == "L1":
+        loss = margin
+    elif norm == "L2":
+        loss = margin ** 2
+    else:
+        # norm == Huber
+        quad = (margin < 2).astype(x.dtype)
+        loss = margin ** 2 / 4 * quad + (margin - 1) * (1 - quad)
+
+    if reduce == "mean":
+        loss = utils.force_array(xp.sum(loss) / len(x), dtype=x.dtype)
+    return loss, mask, margin
+
+
+class HingeMaxMargin(function_node.FunctionNode):
 
     """Hinge max margin loss."""
 
-    def __init__(self, norm='L2', reduce='mean'):
-        if norm in ['L1', 'L2', 'Huber']:
+    def __init__(self, norm="L2", reduce="mean"):
+        if norm in ["L1", "L2", "Huber"]:
             self.norm = norm
         else:
             raise NotImplementedError(
                 "norm should be either 'L1', 'L2' or 'Huber'")
 
-        if reduce in ['mean', 'along_second_axis']:
+        if reduce in ["mean", "along_second_axis"]:
             self.reduce = reduce
         else:
             raise ValueError(
                 "only 'mean' and 'along_second_axis' are valid for 'reduce',"
-                " but '%s' is " 'given' % reduce)
+                " but '%s' is "
+                "given" % reduce
+            )
         self.mask = None
         self.margin = None
 
@@ -31,61 +59,55 @@ class HingeMaxMargin(FunctionNode):
 
         x_type, t_type = in_types
         type_check.expect(
-            x_type.dtype == numpy.float32,
-            t_type.dtype.kind == 'i',
+            x_type.dtype.kind == "f",
+            t_type.dtype.kind == "i",
             x_type.ndim == 2,
             t_type.ndim == 1,
             x_type.shape[0] == t_type.shape[0],
         )
 
-    def forward(self, inputs):
-        xp = cuda.get_array_module(*inputs)
+    def forward_chainerx(self, inputs):
         x, t = inputs
+        loss, self.mask, self.margin = _forward_generic(
+            x, t, self.norm, self.reduce)
+        return (loss,)
 
-        num = len(x)
-        self.mask = xp.zeros_like(x)
-        self.mask[xp.arange(num), t] = -1
-        temp = xp.copy(x)
-        temp[xp.arange(num), t] = numpy.finfo(numpy.float32).min
-        self.mask[xp.arange(num), xp.argmax(temp, 1)] = 1
-        self.margin = xp.maximum(0, 1 + numpy.sum(self.mask * x, 1))
+    def forward(self, inputs):
+        x, t = inputs
+        loss, self.mask, self.margin = _forward_generic(
+            x, t, self.norm, self.reduce)
 
-        if self.norm == 'L1':
-            loss = self.margin
-        elif self.norm == 'L2':
-            loss = self.margin ** 2
-        elif self.norm == 'Huber':
-            quad = (self.margin < 2).astype(x.dtype)
-            loss = self.margin**2 / 4 * quad + (self.margin-1)*(1-quad)
-        else:
-            raise NotImplementedError()
-
-        if self.reduce == 'mean':
-            loss = xp.array(loss.sum() / num, dtype=x.dtype)
-
-        return loss,
+        return (loss,)
 
     def backward(self, indexes, grad_outputs):
         gloss, = grad_outputs
 
-        if self.reduce == 'mean':
+        if self.reduce == "mean":
             gloss /= self.margin.shape[0]
 
-        if self.norm == 'L1':
-            gx = gloss * F.sign(self.mask * F.expand_dims(self.margin, 1))
-        elif self.norm == 'L2':
-            gx = 2 * gloss * self.mask * F.expand_dims(self.margin, 1)
-        elif self.norm == 'Huber':
-            gx = gloss * self.mask * \
-                F.expand_dims(F.minimum(
-                    self.margin / 2, F.sign(self.margin)), 1)
+        if self.norm == "L1":
+            gx = (
+                gloss * sign.sign(
+                    self.mask * expand_dims.expand_dims(self.margin, 1)))
+        elif self.norm == "L2":
+            gx = (
+                2 * gloss * self.mask
+                * expand_dims.expand_dims(self.margin, 1))
+        elif self.norm == "Huber":
+            gx = (
+                gloss
+                * self.mask
+                * expand_dims.expand_dims(
+                    minimum.minimum(self.margin / 2, sign.sign(self.margin)), 1
+                )
+            )
         else:
             raise NotImplementedError()
 
         return gx, None
 
 
-def hinge_max_margin(x, t, norm='L2', reduce='mean'):
+def hinge_max_margin(x, t, norm="L2", reduce="mean"):
     """Computes the hinge loss for a one vs max classification task.
 
         .. math::
@@ -117,26 +139,22 @@ def hinge_max_margin(x, t, norm='L2', reduce='mean'):
         <https://en.wikipedia.org/wiki/Structured_support_vector_machine>'
 
     Args:
-        x (:class:`~chainer.Variable` or :class:`numpy.ndarray` or \
-        :class:`cupy.ndarray` of :class:`numpy.float`):
-            Input variable. The shape of ``x`` should be (:math:`N`, :math:`K`)
-            .
-        t (:class:`~chainer.Variable` or :class:`numpy.ndarray` or \
-        :class:`cupy.ndarray` of signed integer):
-            The :math:`N`-dimensional label vector with values
+        x (:class:`~chainer.Variable` or :ref:`ndarray`): Input variable.
+            The shape of ``x`` should be (:math:`N`, :math:`K`).
+        t (:class:`~chainer.Variable` or :ref:`ndarray`): The
+            :math:`N`-dimensional label vector with values
             :math:`t_n \\in \\{0, 1, 2, \\dots, K-1\\}`.
             The shape of ``t`` should be (:math:`N`,).
         norm (string): Specifies norm type. Either ``'L1'`` , ``'L2'`` ,
-         ``'Huber'`` are acceptable.
+            ``'Huber'`` are acceptable.
         reduce (str): Reduction option. Its value must be either
-            ``'mean'`` [default] or ``'along_second_axis'``.
-             Otherwise, :class:`ValueError` is raised.
+            ``'mean'`` or ``'no'``. The default value is ``'mean'``.
 
     Returns:
         ~chainer.Variable:
             A variable object holding the hinge max margin loss.
             If ``reduce`` is ``'along_second_axis'``, the output variable holds
-             an array whose shape is same :math:`N`.
+            an array whose shape is same :math:`N`.
             If it is ``'mean'``, the output variable holds a scalar value.
 
     .. admonition:: Example
@@ -144,21 +162,17 @@ def hinge_max_margin(x, t, norm='L2', reduce='mean'):
         In this case, the batch size ``N`` is 4 and the number of classes ``K``
         is 2.
         >>> import numpy as np
-        >>> x = np.stack((np.arange(10),5*np.ones((10,))),1).astype(np.float32)
+        >>> x = np.stack(
+        ...     (np.arange(10), 5 * np.ones(10)), 1).astype(np.float32)
         >>> t = np.ones((10,),np.int32)
-        >>> hinge_max_margin(x, t, norm='L1', reduce='along_second_axis')
+        >>> F.hinge_max_margin(x, t, norm='L1', reduce='no')
         variable([0., 0., 0., 0., 0., 1., 2., 3., 4., 5.])
-        >>> hinge_max_margin(x, t)
+        >>> F.hinge_max_margin(x, t)
         variable(5.5)
-        >>> hinge_max_margin(x, t, norm='L1')
+        >>> F.hinge_max_margin(x, t, norm='L1')
         variable(1.5)
-        >>> hinge_max_margin(x, t, norm='Huber')
+        >>> F.hinge_max_margin(x, t, norm='Huber')
         variable(1.025)
-
 
     """
     return HingeMaxMargin(norm, reduce).apply((x, t))[0]
-
-
-if __name__ == '__main__':
-    help(hinge_max_margin)
