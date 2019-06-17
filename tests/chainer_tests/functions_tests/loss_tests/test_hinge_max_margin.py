@@ -18,7 +18,7 @@ from chainer import utils
 @testing.inject_backend_tests(
     None,
     # CPU
-    [{}],
+    [{}]
     # GPU
     + testing.product({
         'use_cuda': [True],
@@ -31,6 +31,8 @@ from chainer import utils
 )
 class TestHingeMaxMargin(testing.FunctionTestCase):
 
+    dodge_nondifferentiable = True
+
     def setUp(self):
         if self.dtype == numpy.float16:
             self.check_forward_options.update({'atol': 1e-3, 'rtol': 1e-3})
@@ -39,9 +41,9 @@ class TestHingeMaxMargin(testing.FunctionTestCase):
                 {'atol': 5e-2, 'rtol': 5e-2})
 
     def generate_inputs(self):
-        x = numpy.random.unifom(-1, 1, self.shape).astype(self.dtype)
+        x = numpy.random.uniform(-1, 1, self.shape).astype(self.dtype)
         t = numpy.random.randint(
-            0, self.shape[1], self.shape).astype(self.label_dtype)
+            0, self.shape[1], self.shape[0]).astype(self.label_dtype)
         return (x, t)
 
     def forward(self, inputs, backend):
