@@ -230,7 +230,8 @@ class SpectralNormalization(link_hook.LinkHook):
         initialW = getattr(link, self.weight_name)
         if initialW.shape[self.axis] == 0:
             raise ValueError(
-                'Expect {}.shape[{}] > 0'.format(self.weight_name, self.axis)
+                'Expect {}.shape[{}] > 0, Actual: {}'.format(
+                    self.weight_name, self.axis, initialW.shape[self.axis])
             )
         u = link.xp.random.normal(
             size=(initialW.shape[self.axis],)).astype(dtype=initialW.dtype)
