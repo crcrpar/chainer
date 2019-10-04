@@ -28,6 +28,7 @@ set -eu
 ################################################################################
 main() {
   TARGET="$1"
+  DOCKER_IMAGE=${2:-""}
 
   # Initialization.
   prepare_docker &
@@ -54,9 +55,16 @@ main() {
       if [ "${SPREADSHEET_ID:-}" != '' ]; then
         docker_args+=(--env="SPREADSHEET_ID=${SPREADSHEET_ID}")
       fi
-      run "${docker_args[@]}" \
-          "asia.gcr.io/pfn-public-ci/chainer-ci-prep.${TARGET}" \
-          bash /src/.pfnci/run.sh "${TARGET}"
+      if [ "$DOCKER_IMAGE" = "" ]; then
+        run "${docker_args[@]}" \
+            "asia.gcr.io/pfn-public-ci/chainer-ci-prep.${TARGET}" \
+            bash /src/.pfnci/run.sh "${TARGET}"
+      else
+
+        run "${docker_args[@]}" \
+            "${DOCKER_IMAGE}" \
+            bash /src/.pfnci/run.sh "${TARGET}"
+      fi;
       ;;
     # Docker builds.
     docker.* )
@@ -102,9 +110,15 @@ main() {
       mkdir /tmp/cupy-wheel
       gsutil -q cp gs://tmp-asia-pfn-public-ci/cupy/wheel/${CUPY_MASTER}/cuda9.2/*.whl /tmp/cupy-wheel
       docker_args+=(--volume="/tmp/cupy-wheel:/cupy-wheel:ro")
-      run "${docker_args[@]}" \
-          "asia.gcr.io/pfn-public-ci/chainermn-ci-prep-${CUDATAG:-cuda92}" \
-          bash /src/.pfnci/run.sh "${TARGET}"
+      if [ "$DOCKER_IMAGE" = "" ]; then
+        run "${docker_args[@]}" \
+            "asia.gcr.io/pfn-public-ci/chainer-ci-prep.${TARGET}" \
+            bash /src/.pfnci/run.sh "${TARGET}"
+      else
+        run "${docker_args[@]}" \
+            "${DOCKER_IMAGE}" \
+            bash /src/.pfnci/run.sh "${TARGET}"
+      fi;
       ;;
     # Unsupported targets.
     * )
